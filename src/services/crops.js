@@ -1,10 +1,12 @@
 import { query } from '../db.js';
 
 const GROWTH_TIMES = {
-  common: 5,        // 5 минут
-  rare: 15,         // 15 минут
-  epic: 60,         // 1 час
-  legendary: 240,   // 4 часа
+  common: 5,
+  uncommon: 10,
+  rare: 15,
+  epic: 60,
+  legendary: 240,
+  mythic: 720,
 };
 
 export async function plantSeed(userId, seedTypeId) {
