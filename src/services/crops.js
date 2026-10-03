@@ -121,4 +121,31 @@ export async function harvestCrop(userId, cropId) {
   );
 
   return { cropName: crop.seed_name, sellPrice: crop.sell_price };
+}export async function waterCrop(userId, cropId, score) {
+  const cropRes = await query(
+    'SELECT * FROM planted_crops WHERE id = $1 AND user_id = $2 AND harvested = FALSE',
+    [cropId, userId]
+  );
+  if (cropRes.rows.length === 0) throw new Error('Crop not found');
+
+  const crop = cropRes.rows[0];
+
+  // Score 0-20 → +25 к воде и +2 к качеству за каждую каплю (но с лимитами)
+  const waterGain = Math.min(20, score) * 5;
+  const qualityGain = Math.min(20, score) * 2;
+
+  const newWater = Math.min(100, crop.water_level + waterGain);
+  const newQuality = Math.min(100, crop.quality + qualityGain);
+
+  await query(
+    'UPDATE planted_crops SET water_level = $1, quality = $2, last_watered = NOW() WHERE id = $3',
+    [newWater, newQuality, cropId]
+  );
+
+  return {
+    waterLevel: newWater,
+    quality: newQuality,
+    waterGain,
+    qualityGain,
+  };
 }

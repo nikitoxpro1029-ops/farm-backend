@@ -1,6 +1,6 @@
 import express from 'express';
 import { verifyTelegramAuth } from '../middleware/auth.js';
-import { plantSeed, harvestCrop } from '../services/crops.js';
+import { plantSeed, harvestCrop, waterCrop } from '../services/crops.js';
 import { query } from '../db.js';
 
 const router = express.Router();
@@ -25,6 +25,9 @@ router.get('/state', verifyTelegramAuth, async (req, res) => {
       [user.rows[0].id]
     );const crops = await query(
       'SELECT pc.*, st.name, st.rarity FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id WHERE pc.user_id = $1 AND pc.harvested = FALSE ORDER BY pc.planted_at DESC',
+      [user.rows[0].id]
+    );await query(
+      'UPDATE planted_crops SET water_level = GREATEST(0, water_level - FLOOR(EXTRACT(EPOCH FROM (NOW() - last_watered)) / 3600 * 10)), last_watered = NOW() WHERE user_id = $1 AND harvested = FALSE AND water_level > 0',
       [user.rows[0].id]
     );
 
@@ -87,7 +90,15 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
     }
 
     const seed = await query('SELECT sell_price, name FROM seed_types WHERE id = $1', [seedTypeId]);
-    const totalPrice = seed.rows[0].sell_price * quantity;
+    // Средневзвешенная цена с учётом качества (quality 50-100 → множитель 1.0-1.5)
+    const avgQualityRes = await query(
+      'SELECT AVG(quality) as avg_q FROM planted_crops WHERE user_id = $1 AND seed_type_id = $2 AND harvested = TRUE',
+      [userId, seedTypeId]
+    );
+    const avgQuality = parseFloat(avgQualityRes.rows[0]?.avg_q || 50);
+    const qualityMultiplier = 0.5 + (avgQuality / 100);
+    const unitPrice = Math.floor(seed.rows[0].sell_price * qualityMultiplier);
+    const totalPrice = unitPrice * quantity;
 
     await query(
       'UPDATE harvested_items SET quantity = quantity - $1 WHERE user_id = $2 AND seed_type_id = $3',
@@ -213,7 +224,16 @@ router.post('/claim-bonus', verifyTelegramAuth, async (req, res) => {
   }
 });
 
-export default router;router.get('/plots', verifyTelegramAuth, async (req, res) => {
+router.post('/water', verifyTelegramAuth, async (req, res) => {
+  try {
+    const { cropId, score } = req.body;
+    const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const result = await waterCrop(user.rows[0].id, cropId, score);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});export default router;router.get('/plots', verifyTelegramAuth, async (req, res) => {
   try {
     const userRes = await query('SELECT id, plots FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
     const user = userRes.rows[0];
