@@ -17,12 +17,15 @@ export async function plantSeed(userId, seedTypeId) {
   if (seedResult.rows.length === 0) throw new Error('No seeds available');
 
   const typeResult = await query('SELECT * FROM seed_types WHERE id = $1', [seedTypeId]);
-  const seedType = typeResult.rows[0];if (seedType.rarity === 'product') {
-  throw new Error('Это блюдо нельзя посадить, только продать');
-}
+  const seedType = typeResult.rows[0];
+
+  if (seedType.rarity === 'product') {
+    throw new Error('Это блюдо нельзя посадить, только продать');
+  }
 
   const growthMinutes = GROWTH_TIMES[seedType.rarity] || 5;
   const readyAt = new Date(Date.now() + growthMinutes * 60 * 1000);
+  const expiresAt = new Date(readyAt.getTime() + 24 * 60 * 60 * 1000);
 
   await query(
     'UPDATE user_seeds SET quantity = quantity - 1 WHERE user_id = $1 AND seed_type_id = $2',
@@ -30,35 +33,35 @@ export async function plantSeed(userId, seedTypeId) {
   );
 
   const result = await query(
-    'INSERT INTO planted_crops (user_id, seed_type_id, ready_at) VALUES ($1, $2, $3) RETURNING *',
-    [userId, seedTypeId, readyAt]
+    'INSERT INTO planted_crops (user_id, seed_type_id, ready_at, expires_at) VALUES ($1, $2, $3, $4) RETURNING *',
+    [userId, seedTypeId, readyAt, expiresAt]
   );
   return result.rows[0];
 }
 
 export async function harvestCrop(userId, cropId) {
   const cropResult = await query(
-    `SELECT pc.*, st.sell_price, st.name as seed_name, pc.seed_type_id
-     FROM planted_crops pc
-     JOIN seed_types st ON pc.seed_type_id = st.id
-     WHERE pc.id = $1 AND pc.user_id = $2 AND pc.harvested = FALSE`,
+    'SELECT pc.*, st.sell_price, st.name as seed_name, pc.seed_type_id FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id WHERE pc.id = $1 AND pc.user_id = $2 AND pc.harvested = FALSE',
     [cropId, userId]
   );
   if (cropResult.rows.length === 0) throw new Error('Crop not found');
 
   const crop = cropResult.rows[0];
+
+  if (crop.expires_at && new Date(crop.expires_at) < new Date()) {
+    await query('UPDATE planted_crops SET harvested = TRUE, withered = TRUE WHERE id = $1', [cropId]);
+    throw new Error('Урожай завял. В следующий раз собирайте вовремя!');
+  }
+
   if (new Date(crop.ready_at) > new Date()) {
     const timeLeft = Math.ceil((new Date(crop.ready_at) - new Date()) / 1000 / 60);
-    throw new Error(`Crop not ready. ${timeLeft} minutes left`);
+    throw new Error('Crop not ready. ' + timeLeft + ' minutes left');
   }
 
   await query('UPDATE planted_crops SET harvested = TRUE WHERE id = $1', [cropId]);
 
   await query(
-    `INSERT INTO harvested_items (user_id, seed_type_id, quantity)
-     VALUES ($1, $2, 1)
-     ON CONFLICT (user_id, seed_type_id)
-     DO UPDATE SET quantity = harvested_items.quantity + 1`,
+    'INSERT INTO harvested_items (user_id, seed_type_id, quantity) VALUES ($1, $2, 1) ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = harvested_items.quantity + 1',
     [userId, crop.seed_type_id]
   );
 

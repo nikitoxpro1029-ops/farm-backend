@@ -15,6 +15,11 @@ router.get('/state', verifyTelegramAuth, async (req, res) => {
       );
     }
 
+    await query(
+      'UPDATE planted_crops SET harvested = TRUE, withered = TRUE WHERE user_id = $1 AND harvested = FALSE AND expires_at IS NOT NULL AND expires_at < NOW()',
+      [user.rows[0].id]
+    );
+
     const crops = await query(
       'SELECT pc.*, st.name, st.rarity FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id WHERE pc.user_id = $1 AND pc.harvested = FALSE ORDER BY pc.planted_at DESC',
       [user.rows[0].id]
@@ -94,11 +99,23 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
   }
 });
 
+router.get('/leaderboard', verifyTelegramAuth, async (req, res) => {
+  try {
+    const result = await query('SELECT telegram_id, username, first_name, balance FROM users ORDER BY balance DESC LIMIT 50'
+    );
+    res.json({ leaderboard: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/bonus-status', verifyTelegramAuth, async (req, res) => {
   try {
     const userRes = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
     const userId = userRes.rows[0].id;
-    const today = new Date().toISOString().slice(0, 10);const bonusRes = await query('SELECT * FROM daily_bonuses WHERE user_id = $1', [userId]);
+    const today = new Date().toISOString().slice(0, 10);
+
+    const bonusRes = await query('SELECT * FROM daily_bonuses WHERE user_id = $1', [userId]);
 
     if (bonusRes.rows.length === 0) {
       return res.json({ streak: 0, canClaim: true, nextReward: 50, nextStreak: 1 });
@@ -193,13 +210,4 @@ router.post('/claim-bonus', verifyTelegramAuth, async (req, res) => {
   }
 });
 
-export default router;router.get('/leaderboard', verifyTelegramAuth, async (req, res) => {
-  try {
-    const result = await query(
-      'SELECT telegram_id, username, first_name, balance FROM users ORDER BY balance DESC LIMIT 50'
-    );
-    res.json({ leaderboard: result.rows });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+export default router;
