@@ -17,7 +17,9 @@ export async function plantSeed(userId, seedTypeId) {
   if (seedResult.rows.length === 0) throw new Error('No seeds available');
 
   const typeResult = await query('SELECT * FROM seed_types WHERE id = $1', [seedTypeId]);
-  const seedType = typeResult.rows[0];
+  const seedType = typeResult.rows[0];if (seedType.rarity === 'product') {
+  throw new Error('Это блюдо нельзя посадить, только продать');
+}
 
   const growthMinutes = GROWTH_TIMES[seedType.rarity] || 5;
   const readyAt = new Date(Date.now() + growthMinutes * 60 * 1000);

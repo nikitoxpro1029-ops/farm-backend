@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import farmRoutes from './routes/farm.js';
-import packRoutes from './routes/packs.js';
+import packRoutes from './routes/packs.js';import craftRoutes from './routes/craft.js';
 
 dotenv.config();
 
@@ -11,7 +11,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/api/farm', farmRoutes);
-app.use('/api/packs', packRoutes);
+app.use('/api/packs', packRoutes);app.use('/api/craft', craftRoutes);
 
 app.get('/', (req, res) => res.json({ status: 'ok' }));
 
