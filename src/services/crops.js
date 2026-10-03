@@ -36,7 +36,7 @@ export async function plantSeed(userId, seedTypeId) {
 
 export async function harvestCrop(userId, cropId) {
   const cropResult = await query(
-    `SELECT pc.*, st.sell_price, st.name as seed_name
+    `SELECT pc.*, st.sell_price, st.name as seed_name, pc.seed_type_id
      FROM planted_crops pc
      JOIN seed_types st ON pc.seed_type_id = st.id
      WHERE pc.id = $1 AND pc.user_id = $2 AND pc.harvested = FALSE`,
@@ -51,7 +51,14 @@ export async function harvestCrop(userId, cropId) {
   }
 
   await query('UPDATE planted_crops SET harvested = TRUE WHERE id = $1', [cropId]);
-  await query('UPDATE users SET balance = balance + $1 WHERE id = $2', [crop.sell_price, userId]);
 
-  return { reward: crop.sell_price, cropName: crop.seed_name };
+  await query(
+    `INSERT INTO harvested_items (user_id, seed_type_id, quantity)
+     VALUES ($1, $2, 1)
+     ON CONFLICT (user_id, seed_type_id)
+     DO UPDATE SET quantity = harvested_items.quantity + 1`,
+    [userId, crop.seed_type_id]
+  );
+
+  return { cropName: crop.seed_name, sellPrice: crop.sell_price };
 }

@@ -58,4 +58,56 @@ router.post('/harvest', verifyTelegramAuth, async (req, res) => {
   }
 });
 
-export default router;
+export default router;// Получить содержимое амбара
+router.get('/barn', verifyTelegramAuth, async (req, res) => {
+  try {
+    const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const items = await query(
+      `SELECT hi.id, hi.quantity, st.name, st.rarity, st.sell_price, st.id as seed_type_id
+       FROM harvested_items hi
+       JOIN seed_types st ON hi.seed_type_id = st.id
+       WHERE hi.user_id = $1 AND hi.quantity > 0
+       ORDER BY st.sell_price DESC`,
+      [user.rows[0].id]
+    );
+    res.json({ items: items.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Продать культуру из амбара
+router.post('/sell', verifyTelegramAuth, async (req, res) => {
+  try {
+    const { seedTypeId, quantity } = req.body;
+    const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const userId = user.rows[0].id;
+
+    const item = await query(
+      'SELECT * FROM harvested_items WHERE user_id = $1 AND seed_type_id = $2',
+      [userId, seedTypeId]
+    );
+    if (item.rows.length === 0 || item.rows[0].quantity < quantity) {
+      return res.status(400).json({ error: 'Not enough items' });
+    }
+
+    const seed = await query('SELECT sell_price, name FROM seed_types WHERE id = $1', [seedTypeId]);
+    const totalPrice = seed.rows[0].sell_price * quantity;
+
+    await query(
+      'UPDATE harvested_items SET quantity = quantity - $1 WHERE user_id = $2 AND seed_type_id = $3',
+      [quantity, userId, seedTypeId]
+    );
+
+    await query('UPDATE users SET balance = balance + $1 WHERE id = $2', [totalPrice, userId]);
+
+    res.json({
+      success: true,
+      reward: totalPrice,
+      itemName: seed.rows[0].name,
+      quantity,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
