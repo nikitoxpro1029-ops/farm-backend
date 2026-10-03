@@ -15,19 +15,31 @@ router.get('/state', verifyTelegramAuth, async (req, res) => {
       );
     }
 
+    await query('UPDATE users SET last_seen = NOW(), inactive_notified = FALSE WHERE id = $1', [user.rows[0].id]);
+
     await query(
       'UPDATE planted_crops SET harvested = TRUE, withered = TRUE WHERE user_id = $1 AND harvested = FALSE AND expires_at IS NOT NULL AND expires_at < NOW()',
       [user.rows[0].id]
     );
 
-    await query(
-      'UPDATE users SET last_seen = NOW(), inactive_notified = FALSE WHERE id = $1',
-      [user.rows[0].id]
-    );const crops = await query(
+    const awRes = await query('SELECT autowater_until FROM users WHERE id = $1', [user.rows[0].id]);
+    const awUntil = awRes.rows[0].autowater_until;
+    const hasAutowater = awUntil && new Date(awUntil) > new Date();
+
+    if (hasAutowater) {
+      await query(
+        'UPDATE planted_crops SET water_level = 100, last_watered = NOW() WHERE user_id = $1 AND harvested = FALSE',
+        [user.rows[0].id]
+      );
+    } else {
+      await query(
+        'UPDATE planted_crops SET water_level = GREATEST(0, water_level - FLOOR(EXTRACT(EPOCH FROM (NOW() - last_watered)) / 3600 * 10)), last_watered = NOW() WHERE user_id = $1 AND harvested = FALSE AND water_level > 0',
+        [user.rows[0].id]
+      );
+    }
+
+    const crops = await query(
       'SELECT pc.*, st.name, st.rarity FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id WHERE pc.user_id = $1 AND pc.harvested = FALSE ORDER BY pc.planted_at DESC',
-      [user.rows[0].id]
-    );await query(
-      'UPDATE planted_crops SET water_level = GREATEST(0, water_level - FLOOR(EXTRACT(EPOCH FROM (NOW() - last_watered)) / 3600 * 10)), last_watered = NOW() WHERE user_id = $1 AND harvested = FALSE AND water_level > 0',
       [user.rows[0].id]
     );
 
@@ -36,7 +48,15 @@ router.get('/state', verifyTelegramAuth, async (req, res) => {
       [user.rows[0].id]
     );
 
-    res.json({ user: user.rows[0], crops: crops.rows, seeds: seeds.rows });
+    res.json({
+      user: user.rows[0],
+      crops: crops.rows,
+      seeds: seeds.rows,
+      autowater: {
+        active: hasAutowater,
+        until: awUntil,
+      },
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -62,6 +82,17 @@ router.post('/harvest', verifyTelegramAuth, async (req, res) => {
   }
 });
 
+router.post('/water', verifyTelegramAuth, async (req, res) => {
+  try {
+    const { cropId, score } = req.body;
+    const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const result = await waterCrop(user.rows[0].id, cropId, score);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 router.get('/barn', verifyTelegramAuth, async (req, res) => {
   try {
     const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
@@ -69,8 +100,7 @@ router.get('/barn', verifyTelegramAuth, async (req, res) => {
       'SELECT hi.id, hi.quantity, st.name, st.rarity, st.sell_price, st.id as seed_type_id FROM harvested_items hi JOIN seed_types st ON hi.seed_type_id = st.id WHERE hi.user_id = $1 AND hi.quantity > 0 ORDER BY st.sell_price DESC',
       [user.rows[0].id]
     );
-    res.json({ items: items.rows });
-  } catch (error) {
+    res.json({ items: items.rows });} catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
@@ -90,7 +120,6 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
     }
 
     const seed = await query('SELECT sell_price, name FROM seed_types WHERE id = $1', [seedTypeId]);
-    // Средневзвешенная цена с учётом качества (quality 50-100 → множитель 1.0-1.5)
     const avgQualityRes = await query(
       'SELECT AVG(quality) as avg_q FROM planted_crops WHERE user_id = $1 AND seed_type_id = $2 AND harvested = TRUE',
       [userId, seedTypeId]
@@ -115,9 +144,126 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
 
 router.get('/leaderboard', verifyTelegramAuth, async (req, res) => {
   try {
-    const result = await query('SELECT telegram_id, username, first_name, balance FROM users ORDER BY balance DESC LIMIT 50'
+    const result = await query(
+      'SELECT telegram_id, username, first_name, balance FROM users ORDER BY balance DESC LIMIT 50'
     );
     res.json({ leaderboard: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/plots', verifyTelegramAuth, async (req, res) => {
+  try {
+    const userRes = await query('SELECT id, plots FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const user = userRes.rows[0];
+    const maxAllowed = 12;
+    const canBuy = user.plots < maxAllowed;
+    const prices = [0, 0, 0, 0, 0, 0, 500, 1000, 2000, 4000, 8000, 16000, 0];
+    const nextPrice = canBuy ? prices[user.plots + 1] : 0;
+
+    const plantedInfo = await query(
+      'SELECT COUNT(*) as cnt FROM planted_crops WHERE user_id = $1 AND harvested = FALSE',
+      [user.id]
+    );
+
+    res.json({
+      plots: user.plots,
+      maxAllowed,
+      canBuy,
+      nextPrice,
+      planted: parseInt(plantedInfo.rows[0].cnt),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/buy-plot', verifyTelegramAuth, async (req, res) => {
+  try {
+    const userRes = await query('SELECT id, plots, balance FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const user = userRes.rows[0];
+    const maxAllowed = 12;
+
+    if (user.plots >= maxAllowed) {
+      return res.status(400).json({ error: 'Максимум грядок достигнут' });
+    }
+
+    const prices = [0, 0, 0, 0, 0, 0, 500, 1000, 2000, 4000, 8000, 16000, 0];
+    const price = prices[user.plots + 1];
+
+    if (user.balance < price) {
+      return res.status(400).json({ error: 'Недостаточно монет' });
+    }
+
+    await query('UPDATE users SET balance = balance - $1, plots = plots + 1 WHERE id = $2', [price, user.id]);
+
+    res.json({ success: true, newPlots: user.plots + 1, spent: price });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/fertilize', verifyTelegramAuth, async (req, res) => {
+  try {
+    const { cropId } = req.body;
+    const userRes = await query('SELECT id, balance FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const user = userRes.rows[0];
+
+    const cropRes = await query(
+      'SELECT * FROM planted_crops WHERE id = $1 AND user_id = $2 AND harvested = FALSE AND fertilized = FALSE',
+      [cropId, user.id]
+    );
+    if (cropRes.rows.length === 0) {return res.status(400).json({ error: 'Эту грядку уже удобряли или не нашли' });
+    }
+
+    const cost = 100;
+    if (user.balance < cost) {
+      return res.status(400).json({ error: 'Недостаточно монет (нужно 100)' });
+    }
+
+    const crop = cropRes.rows[0];
+    const now = new Date();
+    const readyAt = new Date(crop.ready_at);
+    const plantedAt = new Date(crop.planted_at);
+    const totalTime = readyAt.getTime() - plantedAt.getTime();
+    const elapsed = now.getTime() - plantedAt.getTime();
+    const remaining = totalTime - elapsed;
+
+    const newRemaining = Math.max(1000, remaining / 2);
+    const newReadyAt = new Date(now.getTime() + newRemaining);
+
+    await query('UPDATE users SET balance = balance - $1 WHERE id = $2', [cost, user.id]);
+    await query(
+      'UPDATE planted_crops SET ready_at = $1, fertilized = TRUE WHERE id = $2',
+      [newReadyAt, cropId]
+    );
+
+    res.json({ success: true, spent: cost, savedMs: remaining - newRemaining });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/buy-autowater', verifyTelegramAuth, async (req, res) => {
+  try {
+    const userRes = await query('SELECT id, balance, autowater_until FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const user = userRes.rows[0];
+    const cost = 500;
+
+    if (user.balance < cost) {
+      return res.status(400).json({ error: 'Недостаточно монет (нужно 500)' });
+    }
+
+    const now = new Date();
+    const currentUntil = user.autowater_until && new Date(user.autowater_until) > now
+      ? new Date(user.autowater_until)
+      : now;
+    const newUntil = new Date(currentUntil.getTime() + 24 * 60 * 60 * 1000);
+
+    await query('UPDATE users SET balance = balance - $1, autowater_until = $2 WHERE id = $3', [cost, newUntil, user.id]);
+
+    res.json({ success: true, until: newUntil, spent: cost });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -183,9 +329,7 @@ router.post('/claim-bonus', verifyTelegramAuth, async (req, res) => {
       } else {
         newStreak = 1;
       }
-    }
-
-    const rewards = [0, 50, 75, 100, 150, 200, 300, 500];
+    }const rewards = [0, 50, 75, 100, 150, 200, 300, 500];
     const reward = rewards[newStreak] || 50;
 
     await query('UPDATE users SET balance = balance + $1 WHERE id = $2', [reward, userId]);
@@ -224,62 +368,4 @@ router.post('/claim-bonus', verifyTelegramAuth, async (req, res) => {
   }
 });
 
-router.post('/water', verifyTelegramAuth, async (req, res) => {
-  try {
-    const { cropId, score } = req.body;
-    const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
-    const result = await waterCrop(user.rows[0].id, cropId, score);
-    res.json({ success: true, ...result });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});export default router;router.get('/plots', verifyTelegramAuth, async (req, res) => {
-  try {
-    const userRes = await query('SELECT id, plots FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
-    const user = userRes.rows[0];
-    const maxAllowed = 12;
-    const canBuy = user.plots < maxAllowed;
-    const prices = [0, 0, 0, 0, 0, 0, 500, 1000, 2000, 4000, 8000, 16000, 0];
-    const nextPrice = canBuy ? prices[user.plots + 1] : 0;
-
-    const plantedInfo = await query(
-      'SELECT COUNT(*) as cnt FROM planted_crops WHERE user_id = $1 AND harvested = FALSE',
-      [user.id]
-    );
-
-    res.json({
-      plots: user.plots,
-      maxAllowed,
-      canBuy,
-      nextPrice,
-      planted: parseInt(plantedInfo.rows[0].cnt),
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-router.post('/buy-plot', verifyTelegramAuth, async (req, res) => {
-  try {
-    const userRes = await query('SELECT id, plots, balance FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
-    const user = userRes.rows[0];
-    const maxAllowed = 12;
-
-    if (user.plots >= maxAllowed) {
-      return res.status(400).json({ error: 'Максимум грядок достигнут' });
-    }
-
-    const prices = [0, 0, 0, 0, 0, 0, 500, 1000, 2000, 4000, 8000, 16000, 0];
-    const price = prices[user.plots + 1];
-
-    if (user.balance < price) {
-      return res.status(400).json({ error: 'Недостаточно монет' });
-    }
-
-    await query('UPDATE users SET balance = balance - $1, plots = plots + 1 WHERE id = $2', [price, user.id]);
-
-    res.json({ success: true, newPlots: user.plots + 1, spent: price });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+export default router;
