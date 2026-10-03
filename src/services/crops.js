@@ -1,4 +1,4 @@
-import { query } from '../db.js';
+import { query } from '../db.js';import { sendTelegramMessage } from './notifications.js';
 
 const GROWTH_TIMES = {
   common: 5,
@@ -36,7 +36,30 @@ export async function plantSeed(userId, seedTypeId) {
     'INSERT INTO planted_crops (user_id, seed_type_id, ready_at, expires_at) VALUES ($1, $2, $3, $4) RETURNING *',
     [userId, seedTypeId, readyAt, expiresAt]
   );
-  return result.rows[0];
+  const newCrop = result.rows[0];
+  const delay = readyAt.getTime() - Date.now();
+
+  if (delay > 0 && delay < 24 * 60 * 60 * 1000) {
+    setTimeout(async () => {
+      try {
+        const check = await query(
+          'SELECT pc.id, pc.notified_ready, st.name as seed_name, u.telegram_id FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id JOIN users u ON pc.user_id = u.id WHERE pc.id = $1 AND pc.harvested = FALSE AND pc.notified_ready = FALSE',
+          [newCrop.id]
+        );
+        if (check.rows.length > 0) {
+          const cropInfo = check.rows[0];
+          const message = '🌾 Твой урожай готов!\n\n' +
+                          'Растение: ' + cropInfo.seed_name + '\n' +
+                          '⏰ Собери в течение 24 часов, иначе завянет!\n\n' +
+                          'Открой Farm Game и забери его.';
+          await sendTelegramMessage(cropInfo.telegram_id, message);
+          await query('UPDATE planted_crops SET notified_ready = TRUE WHERE id = $1', [cropInfo.id]);
+        }
+      } catch (err) {
+        console.error('Notification error:', err);
+      }
+    }, delay);
+  }return result.rows[0];
 }
 
 export async function harvestCrop(userId, cropId) {
