@@ -14,7 +14,16 @@ export async function plantSeed(userId, seedTypeId) {
     'SELECT id FROM user_seeds WHERE user_id = $1 AND seed_type_id = $2 AND quantity > 0',
     [userId, seedTypeId]
   );
-  if (seedResult.rows.length === 0) throw new Error('No seeds available');
+  if (seedResult.rows.length === 0) throw new Error('No seeds available');const plotsInfo = await query('SELECT plots FROM users WHERE id = $1', [userId]);
+  const maxPlots = plotsInfo.rows[0].plots;
+
+  const plantedInfo = await query(
+    'SELECT COUNT(*) as cnt FROM planted_crops WHERE user_id = $1 AND harvested = FALSE',
+    [userId]
+  );
+  if (parseInt(plantedInfo.rows[0].cnt) >= maxPlots) {
+    throw new Error('Все грядки заняты! Купите ещё в разделе Ферма.');
+  }
 
   const typeResult = await query('SELECT * FROM seed_types WHERE id = $1', [seedTypeId]);
   const seedType = typeResult.rows[0];

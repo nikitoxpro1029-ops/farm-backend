@@ -213,4 +213,53 @@ router.post('/claim-bonus', verifyTelegramAuth, async (req, res) => {
   }
 });
 
-export default router;
+export default router;router.get('/plots', verifyTelegramAuth, async (req, res) => {
+  try {
+    const userRes = await query('SELECT id, plots FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const user = userRes.rows[0];
+    const maxAllowed = 12;
+    const canBuy = user.plots < maxAllowed;
+    const prices = [0, 0, 0, 0, 0, 0, 500, 1000, 2000, 4000, 8000, 16000, 0];
+    const nextPrice = canBuy ? prices[user.plots + 1] : 0;
+
+    const plantedInfo = await query(
+      'SELECT COUNT(*) as cnt FROM planted_crops WHERE user_id = $1 AND harvested = FALSE',
+      [user.id]
+    );
+
+    res.json({
+      plots: user.plots,
+      maxAllowed,
+      canBuy,
+      nextPrice,
+      planted: parseInt(plantedInfo.rows[0].cnt),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/buy-plot', verifyTelegramAuth, async (req, res) => {
+  try {
+    const userRes = await query('SELECT id, plots, balance FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const user = userRes.rows[0];
+    const maxAllowed = 12;
+
+    if (user.plots >= maxAllowed) {
+      return res.status(400).json({ error: 'Максимум грядок достигнут' });
+    }
+
+    const prices = [0, 0, 0, 0, 0, 0, 500, 1000, 2000, 4000, 8000, 16000, 0];
+    const price = prices[user.plots + 1];
+
+    if (user.balance < price) {
+      return res.status(400).json({ error: 'Недостаточно монет' });
+    }
+
+    await query('UPDATE users SET balance = balance - $1, plots = plots + 1 WHERE id = $2', [price, user.id]);
+
+    res.json({ success: true, newPlots: user.plots + 1, spent: price });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
