@@ -1,4 +1,5 @@
-import { query } from '../db.js';import { sendTelegramMessage } from './notifications.js';
+import { query } from '../db.js';
+import { sendTelegramMessage } from './notifications.js';
 
 const GROWTH_TIMES = {
   common: 5,
@@ -14,7 +15,9 @@ export async function plantSeed(userId, seedTypeId) {
     'SELECT id FROM user_seeds WHERE user_id = $1 AND seed_type_id = $2 AND quantity > 0',
     [userId, seedTypeId]
   );
-  if (seedResult.rows.length === 0) throw new Error('No seeds available');const plotsInfo = await query('SELECT plots FROM users WHERE id = $1', [userId]);
+  if (seedResult.rows.length === 0) throw new Error('No seeds available');
+
+  const plotsInfo = await query('SELECT plots FROM users WHERE id = $1', [userId]);
   const maxPlots = plotsInfo.rows[0].plots;
 
   const plantedInfo = await query(
@@ -45,34 +48,12 @@ export async function plantSeed(userId, seedTypeId) {
     'INSERT INTO planted_crops (user_id, seed_type_id, ready_at, expires_at) VALUES ($1, $2, $3, $4) RETURNING *',
     [userId, seedTypeId, readyAt, expiresAt]
   );
+
   const newCrop = result.rows[0];
   const delay = readyAt.getTime() - Date.now();
 
   if (delay > 0 && delay < 24 * 60 * 60 * 1000) {
-    setTimeout// Уведомление за 2 часа до увядания
-  const expiringDelay = expiresAt.getTime() - Date.now() - 2 * 60 * 60 * 1000;
-
-  if (expiringDelay > 0 && expiringDelay < 26 * 60 * 60 * 1000) {
     setTimeout(async () => {
-      try {
-        const check = await query(
-          'SELECT pc.id, pc.notified_expiring, st.name as seed_name, u.telegram_id FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id JOIN users u ON pc.user_id = u.id WHERE pc.id = $1 AND pc.harvested = FALSE AND pc.notified_expiring = FALSE AND pc.expires_at > NOW()',
-          [newCrop.id]
-        );
-        if (check.rows.length > 0) {
-          const info = check.rows[0];
-          const message = '⚠️ Срочно!\n\n' +
-                          'Растение: ' + info.seed_name + '\n' +
-                          '⏰ Осталось меньше 2 часов, потом завянет!\n\n' +
-                          'Зайди скорее в Farm Game!';
-          await sendTelegramMessage(info.telegram_id, message);
-          await query('UPDATE planted_crops SET notified_expiring = TRUE WHERE id = $1', [info.id]);
-        }
-      } catch (err) {
-        console.error('Expiring notification error:', err);
-      }
-    }, expiringDelay);
-  }(async () => {
       try {
         const check = await query(
           'SELECT pc.id, pc.notified_ready, st.name as seed_name, u.telegram_id FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id JOIN users u ON pc.user_id = u.id WHERE pc.id = $1 AND pc.harvested = FALSE AND pc.notified_ready = FALSE',
@@ -91,7 +72,9 @@ export async function plantSeed(userId, seedTypeId) {
         console.error('Notification error:', err);
       }
     }, delay);
-  }return result.rows[0];
+  }
+
+  return newCrop;
 }
 
 export async function harvestCrop(userId, cropId) {
@@ -130,16 +113,23 @@ export async function harvestCrop(userId, cropId) {
 
   const crop = cropRes.rows[0];
 
-  // Score 0-20 → +25 к воде и +2 к качеству за каждую каплю (но с лимитами)
   const waterGain = Math.min(20, score) * 5;
   const qualityGain = Math.min(20, score) * 2;
 
   const newWater = Math.min(100, crop.water_level + waterGain);
-  const newQuality = Math.min(100, crop.quality + qualityGain);
+  let newQuality = Math.min(100, crop.quality + qualityGain);
+  let newStreak = (crop.water_streak || 0) + 1;
+  let bonusQuality = 0;
+
+  if (newStreak >= 3) {
+    bonusQuality = 10;
+    newQuality = Math.min(100, newQuality + bonusQuality);
+    newStreak = 0;
+  }
 
   await query(
-    'UPDATE planted_crops SET water_level = $1, quality = $2, last_watered = NOW() WHERE id = $3',
-    [newWater, newQuality, cropId]
+    'UPDATE planted_crops SET water_level = $1, quality = $2, water_streak = $3, last_watered = NOW() WHERE id = $4',
+    [newWater, newQuality, newStreak, cropId]
   );
 
   return {
@@ -147,5 +137,7 @@ export async function harvestCrop(userId, cropId) {
     quality: newQuality,
     waterGain,
     qualityGain,
+    bonusQuality,
+    waterStreak: newStreak,
   };
 }
