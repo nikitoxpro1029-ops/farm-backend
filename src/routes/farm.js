@@ -20,7 +20,10 @@ router.get('/state', verifyTelegramAuth, async (req, res) => {
       [user.rows[0].id]
     );
 
-    const crops = await query(
+    await query(
+      'UPDATE users SET last_seen = NOW(), inactive_notified = FALSE WHERE id = $1',
+      [user.rows[0].id]
+    );const crops = await query(
       'SELECT pc.*, st.name, st.rarity FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id WHERE pc.user_id = $1 AND pc.harvested = FALSE ORDER BY pc.planted_at DESC',
       [user.rows[0].id]
     );

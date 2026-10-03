@@ -2,7 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import farmRoutes from './routes/farm.js';
-import packRoutes from './routes/packs.js';import craftRoutes from './routes/craft.js';
+import packRoutes from './routes/packs.js';
+import craftRoutes from './routes/craft.js';
+import { query } from './db.js';
+import { sendTelegramMessage } from './services/notifications.js';
 
 dotenv.config();
 
@@ -11,15 +14,15 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/api/farm', farmRoutes);
-app.use('/api/packs', packRoutes);app.use('/api/craft', craftRoutes);
+app.use('/api/packs', packRoutes);
+app.use('/api/craft', craftRoutes);
 
 app.get('/', (req, res) => res.json({ status: 'ok' }));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));// Проверка просроченных уведомлений при старте
-import { query } from './db.js';
-import { sendTelegramMessage } from './services/notifications.js';
+app.listen(PORT, () => console.log('Server running on port ' + PORT));
 
+// При старте — догоняем пропущенные уведомления о созревании
 setTimeout(async () => {
   try {
     const ready = await query(
@@ -37,3 +40,26 @@ setTimeout(async () => {
     console.error('Startup notification error:', error);
   }
 }, 5000);
+
+// Реактивация неактивных игроков (24+ часов без игры)
+async function checkInactivePlayers() {
+  try {
+    const inactive = await query(
+      "SELECT telegram_id, first_name FROM users WHERE last_seen < NOW() - INTERVAL '24 hours' AND inactive_notified = FALSE"
+    );
+    for (const user of inactive.rows) {
+      const name = user.first_name || 'Фермер';
+      const message = '🌾 ' + name + ', твоя ферма скучает!\n\n' +
+                      'Пока тебя не было, урожай мог созреть или завянуть. ' +
+                      'Заходи посадить новые семена и собрать монеты!';
+      await sendTelegramMessage(user.telegram_id, message);
+      await query('UPDATE users SET inactive_notified = TRUE WHERE telegram_id = $1', [user.telegram_id]);
+    }
+    console.log('Inactive players check:', inactive.rows.length, 'notifications sent');
+  } catch (error) {
+    console.error('Inactive check error:', error);
+  }
+}
+
+setTimeout(checkInactivePlayers, 15000);
+setInterval(checkInactivePlayers, 60 * 60 * 1000);

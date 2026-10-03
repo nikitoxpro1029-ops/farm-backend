@@ -40,7 +40,30 @@ export async function plantSeed(userId, seedTypeId) {
   const delay = readyAt.getTime() - Date.now();
 
   if (delay > 0 && delay < 24 * 60 * 60 * 1000) {
+    setTimeout// Уведомление за 2 часа до увядания
+  const expiringDelay = expiresAt.getTime() - Date.now() - 2 * 60 * 60 * 1000;
+
+  if (expiringDelay > 0 && expiringDelay < 26 * 60 * 60 * 1000) {
     setTimeout(async () => {
+      try {
+        const check = await query(
+          'SELECT pc.id, pc.notified_expiring, st.name as seed_name, u.telegram_id FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id JOIN users u ON pc.user_id = u.id WHERE pc.id = $1 AND pc.harvested = FALSE AND pc.notified_expiring = FALSE AND pc.expires_at > NOW()',
+          [newCrop.id]
+        );
+        if (check.rows.length > 0) {
+          const info = check.rows[0];
+          const message = '⚠️ Срочно!\n\n' +
+                          'Растение: ' + info.seed_name + '\n' +
+                          '⏰ Осталось меньше 2 часов, потом завянет!\n\n' +
+                          'Зайди скорее в Farm Game!';
+          await sendTelegramMessage(info.telegram_id, message);
+          await query('UPDATE planted_crops SET notified_expiring = TRUE WHERE id = $1', [info.id]);
+        }
+      } catch (err) {
+        console.error('Expiring notification error:', err);
+      }
+    }, expiringDelay);
+  }(async () => {
       try {
         const check = await query(
           'SELECT pc.id, pc.notified_ready, st.name as seed_name, u.telegram_id FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id JOIN users u ON pc.user_id = u.id WHERE pc.id = $1 AND pc.harvested = FALSE AND pc.notified_ready = FALSE',
