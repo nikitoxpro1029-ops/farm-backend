@@ -193,4 +193,13 @@ router.post('/claim-bonus', verifyTelegramAuth, async (req, res) => {
   }
 });
 
-export default router;
+export default router;router.get('/leaderboard', verifyTelegramAuth, async (req, res) => {
+  try {
+    const result = await query(
+      'SELECT telegram_id, username, first_name, balance FROM users ORDER BY balance DESC LIMIT 50'
+    );
+    res.json({ leaderboard: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
