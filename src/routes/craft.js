@@ -1,6 +1,7 @@
 import express from 'express';
 import { verifyTelegramAuth } from '../middleware/auth.js';
 import { query } from '../db.js';
+import { addQuestProgress } from '../services/quests.js';
 
 const router = express.Router();
 
@@ -125,7 +126,7 @@ router.post('/craft', verifyTelegramAuth, async (req, res) => {
       newBalance = upd.rows[0].balance;
     }
 
-    res.json({
+    await addQuestProgress(userId, 'cook');res.json({
       success: true,
       resultName: resultInfo.rows[0].name,
       resultRarity: resultInfo.rows[0].rarity,

@@ -109,10 +109,12 @@ router.post('/harvest', verifyTelegramAuth, async (req, res) => {
 
 // ============ WATER ============
 router.post('/water', verifyTelegramAuth, async (req, res) => {
-  try {const { cropId } = req.body;
+  try {
+    const { cropId } = req.body;
     const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
     const result = await waterCrop(user.rows[0].id, cropId);
     await addXp(user.rows[0].id, XP_REWARDS.water, query);
+    await addQuestProgress(user.rows[0].id, 'water');
     res.json({ success: true, ...result });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -160,6 +162,7 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
 
     await addXp(userId, XP_REWARDS.sell_item * quantity, query);
 
+    await addQuestProgress(userId, 'sell', quantity);
     res.json({ success: true, reward: totalPrice, itemName: seed.rows[0].name, quantity });
   } catch (error) {
     res.status(500).json({ error: error.message });
