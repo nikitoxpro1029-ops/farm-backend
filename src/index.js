@@ -59,7 +59,25 @@ async function checkInactivePlayers() {
   } catch (error) {
     console.error('Inactive check error:', error);
   }
+}async function checkBonusReminders() {
+  try {
+    const candidates = await query(
+      "SELECT u.telegram_id, u.first_name FROM users u LEFT JOIN daily_bonuses db ON db.user_id = u.id WHERE (db.last_claim_date IS NULL OR db.last_claim_date < CURRENT_DATE) AND (u.bonus_notified_date IS NULL OR u.bonus_notified_date < CURRENT_DATE) LIMIT 50"
+    );
+    for (const user of candidates.rows) {
+      const name = user.first_name || 'Фермер';
+      const message = '🎁 ' + name + ', твой ежедневный бонус ждёт!\n\nЗаходи и забери монеты — на 7-й день дают 1000💰 и редкое семя!';
+      await sendTelegramMessage(user.telegram_id, message);
+      await query('UPDATE users SET bonus_notified_date = CURRENT_DATE WHERE telegram_id = $1', [user.telegram_id]);
+    }
+    console.log('Bonus reminders:', candidates.rows.length, 'sent');
+  } catch (error) {
+    console.error('Bonus reminder error:', error);
+  }
 }
+
+setTimeout(checkBonusReminders, 20000);
+setInterval(checkBonusReminders, 6 * 60 * 60 * 1000);
 
 setTimeout(checkInactivePlayers, 15000);
 setInterval(checkInactivePlayers, 60 * 60 * 1000);
