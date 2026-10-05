@@ -8,12 +8,13 @@ import { query } from './db.js';
 import { sendTelegramMessage } from './services/notifications.js';
 import petsRoutes from './routes/pets.js';
 import questRoutes from './routes/quests.js';
+import tutorialRoutes from './routes/tutorial.js';
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
+app.use('/api/tutorial', tutorialRoutes);
 app.use('/api/farm', farmRoutes);
 app.use('/api/packs', packRoutes);
 app.use('/api/memory', memoryRoutes);
