@@ -37,7 +37,10 @@ export async function plantSeed(userId, seedTypeId) {
 
   const growthMinutes = GROWTH_TIMES[seedType.rarity] || 5;
   const readyAt = new Date(Date.now() + growthMinutes * 60 * 1000);
-  const expiresAt = new Date(readyAt.getTime() + 24 * 60 * 60 * 1000);
+ const dogRes = await query('SELECT id FROM user_pets WHERE user_id = $1 AND pet_type = $2 LIMIT 1', [userId, 'dog']);
+const hasDog = dogRes.rows.length > 0;
+const witherHours = hasDog ? 36 : 24;
+const expiresAt = new Date(readyAt.getTime() + witherHours * 60 * 60 * 1000);
 
   await query(
     'UPDATE user_seeds SET quantity = quantity - 1 WHERE user_id = $1 AND seed_type_id = $2',

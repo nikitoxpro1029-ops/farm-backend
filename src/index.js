@@ -6,7 +6,7 @@ import packRoutes from './routes/packs.js';
 import craftRoutes from './routes/craft.js';
 import { query } from './db.js';
 import { sendTelegramMessage } from './services/notifications.js';
-
+import petsRoutes from './routes/pets.js';
 dotenv.config();
 
 const app = express();
@@ -15,7 +15,7 @@ app.use(express.json());
 
 app.use('/api/farm', farmRoutes);
 app.use('/api/packs', packRoutes);
-app.use('/api/craft', craftRoutes);
+app.use('/api/craft', craftRoutes);app.use('/api/pets', petsRoutes);
 
 app.get('/', (req, res) => res.json({ status: 'ok' }));
 
