@@ -11,7 +11,7 @@ export const TUTORIAL_STEPS = [
   { step: 6,  dialog: 'Деньги нужны всегда. Открой Амбар сверху → вкладку Урожай → продай морковку.', trigger: 'sell' },
   { step: 7,  dialog: 'Умница! Держи новую грядку в подарок от Деда — расширяйся, внучок!', trigger: null },
   { step: 8,  dialog: 'Слышал, в Паках диковинные семена выпадают? Попробуй открыть один — авось повезёт!', trigger: 'pack' },
-  { step: 9,  dialog: 'А вот моё любимое — Кухня! Собери ингредиенты и приготовь блюдо — прибыль жирнее в разы.', trigger: 'cook' },
+  { step: 9,  dialog: 'А вот моё любимое — Кухня! Держи 3 морковки — испеки Морковный пирог, прибыль жирнее в разы.', trigger: 'cook' },
   { step: 10, dialog: 'И последнее — Задания. Заходи туда каждый день, забирай награды. Держи 500💰 на первое хозяйство. Я горжусь тобой, внучок!', trigger: 'quests' },
 ];
 
@@ -100,6 +100,13 @@ async function advanceTo(userId, nextStep) {
   }// Перешли на шаг 7 ("держи грядку в подарок") — дарим +1 грядку
     if (nextStep === 7) {
       await query('UPDATE users SET plots = plots + 1 WHERE id = $1', [userId]);
+    }// Перешли на шаг 9 ("испеки Морковный пирог") — даём 3 морковки в амбар
+    if (nextStep === 9) {
+      await query(
+        `INSERT INTO harvested_items (user_id, seed_type_id, quantity) VALUES ($1, 2, 3)
+         ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = harvested_items.quantity + 3`,
+        [userId]
+      );
     }
 
   if (nextStep > TUTORIAL_STEPS.length) {
