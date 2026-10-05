@@ -368,7 +368,43 @@ router.post('/claim-bonus', verifyTelegramAuth, async (req, res) => {
   }
 });
 
-export default router;router.post('/set-referrer', verifyTelegramAuth, async (req, res) => {
+router.get('/catalog', verifyTelegramAuth, async (req, res) => {
+  try {
+    const userRes = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const userId = userRes.rows[0].id;
+
+    const allSeeds = await query(
+      'SELECT id, name, rarity, sell_price, description FROM seed_types ORDER BY sell_price ASC'
+    );
+
+    const discovered = await query(
+      'SELECT seed_type_id, times_collected FROM user_discovered WHERE user_id = $1',
+      [userId]
+    );
+
+    const discoveredMap = {};
+    for (const row of discovered.rows) {
+      discoveredMap[row.seed_type_id] = row.times_collected;
+    }
+
+    const catalog = allSeeds.rows.map((seed) => ({
+      id: seed.id,
+      name: seed.name,
+      rarity: seed.rarity,
+      sellPrice: seed.sell_price,
+      description: seed.description,
+      discovered: discoveredMap[seed.id] !== undefined,
+      timesCollected: discoveredMap[seed.id] || 0,
+    }));
+
+    const total = catalog.length;
+    const found = catalog.filter((c) => c.discovered).length;
+
+    res.json({ catalog, total, found });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});export default router;router.post('/set-referrer', verifyTelegramAuth, async (req, res) => {
   try {
     const { referrerTelegramId } = req.body;
     if (!referrerTelegramId) return res.json({ success: false, message: 'No referrer' });
@@ -410,6 +446,39 @@ router.get('/referral-info', verifyTelegramAuth, async (req, res) => {
       referralsCount: user.referrals_count || 0,
       hasReferrer: !!user.referrer_id,
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});router.get('/catalog', verifyTelegramAuth, async (req, res) => {
+  try {
+    const userRes = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const userId = userRes.rows[0].id;
+
+    const allSeeds = await query(
+      'SELECT id, name, rarity, sell_price, description FROM seed_types ORDER BY sell_price ASC'
+    );
+
+    const discovered = await query(
+      'SELECT seed_type_id, times_collected FROM user_discovered WHERE user_id = $1',
+      [userId]
+    );
+
+    const discoveredMap = {};
+    for (const row of discovered.rows) {
+      discoveredMap[row.seed_type_id] = row.times_collected;
+    }
+
+    const catalog = allSeeds.rows.map((seed) => ({
+      id: seed.id,
+      name: seed.name,
+      rarity: seed.rarity,
+      sellPrice: seed.sell_price,
+      description: seed.description,
+      discovered: discoveredMap[seed.id] !== undefined,
+      timesCollected: discoveredMap[seed.id] || 0,
+    }));
+
+    res.json({ catalog, total: catalog.length, found: catalog.filter((c) => c.discovered).length });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

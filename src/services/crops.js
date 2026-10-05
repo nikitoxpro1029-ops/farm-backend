@@ -45,6 +45,9 @@ const expiresAt = new Date(readyAt.getTime() + witherHours * 60 * 60 * 1000);
   await query(
     'UPDATE user_seeds SET quantity = quantity - 1 WHERE user_id = $1 AND seed_type_id = $2',
     [userId, seedTypeId]
+  );await query(
+    'INSERT INTO user_discovered (user_id, seed_type_id, times_collected) VALUES ($1, $2, 0) ON CONFLICT (user_id, seed_type_id) DO NOTHING',
+    [userId, seedTypeId]
   );
 
   const result = await query(
@@ -103,6 +106,9 @@ export async function harvestCrop(userId, cropId) {
 
   await query(
     'INSERT INTO harvested_items (user_id, seed_type_id, quantity) VALUES ($1, $2, 1) ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = harvested_items.quantity + 1',
+    [userId, crop.seed_type_id]
+  );await query(
+    'INSERT INTO user_discovered (user_id, seed_type_id, times_collected) VALUES ($1, $2, 1) ON CONFLICT (user_id, seed_type_id) DO UPDATE SET times_collected = user_discovered.times_collected + 1',
     [userId, crop.seed_type_id]
   );
 
