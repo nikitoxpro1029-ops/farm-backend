@@ -85,6 +85,18 @@ async function advanceTo(userId, nextStep) {
        ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = user_seeds.quantity + 3`,
       [userId]
     );
+  }// Перешли на шаг 5 ("созрела, собери") — мгновенно ускоряем последнюю грядку
+  if (nextStep === 5) {
+    await query(
+      `UPDATE planted_crops
+       SET ready_at = NOW()
+       WHERE id = (
+         SELECT id FROM planted_crops
+         WHERE user_id = $1 AND harvested = false AND withered = false
+         ORDER BY id DESC LIMIT 1
+       )`,
+      [userId]
+    );
   }
 
   if (nextStep > TUTORIAL_STEPS.length) {
