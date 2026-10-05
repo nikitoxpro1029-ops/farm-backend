@@ -67,7 +67,19 @@ export async function tryAdvanceByTrigger(userId, trigger) {
 
 async function advanceTo(userId, nextStep) {
   // Завершили шаг 1 → выдаём 3 морковки (seed_type_id = 2)
-  if (nextStep === 2) {
+  // Перешли на шаг 3 ("полей морковку") — сбрасываем воду последней грядки до 30%
+  if (nextStep === 3) {
+    await query(
+      `UPDATE planted_crops
+       SET water_level = 30, last_watered = NULL
+       WHERE id = (
+         SELECT id FROM planted_crops
+         WHERE user_id = $1 AND harvested = false AND withered = false
+         ORDER BY id DESC LIMIT 1
+       )`,
+      [userId]
+    );
+  }if (nextStep === 2) {
     await query(
       `INSERT INTO user_seeds (user_id, seed_type_id, quantity) VALUES ($1, 2, 3)
        ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = user_seeds.quantity + 3`,
