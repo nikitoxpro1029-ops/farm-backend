@@ -412,7 +412,7 @@ router.post('/claim-bonus', verifyTelegramAuth, async (req, res) => {
       }
     }
 
-    const REWARDS = [0, 100, 150, 200, 300, 400, 600, 1000];
+    const rewards = [0, 30, 50, 75, 100, 150, 200, 400];
     const reward = rewards[newStreak] || 100;
 
     await query('UPDATE users SET balance = balance + $1 WHERE id = $2', [reward, userId]);
