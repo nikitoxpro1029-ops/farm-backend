@@ -145,7 +145,7 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
 router.get('/leaderboard', verifyTelegramAuth, async (req, res) => {
   try {
     const result = await query(
-      'SELECT telegram_id, username, first_name, balance FROM users ORDER BY balance DESC LIMIT 50'
+      'SELECT telegram_id, username, first_name, balance FROM users WHERE hide_from_leaderboard = FALSE OR hide_from_leaderboard IS NULL ORDER BY balance DESC LIMIT 50'
     );
     res.json({ leaderboard: result.rows });
   } catch (error) {
