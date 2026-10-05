@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { sendTelegramMessage } from './notifications.js';
+import { addXp, XP_REWARDS } from './xp.js';
 
 const GROWTH_TIMES = {
   common: 5,
@@ -79,7 +80,7 @@ export async function plantSeed(userId, seedTypeId) {
     }, delay);
   }
 
-  return newCrop;
+  await addXp(userId, XP_REWARDS.plant, query);return newCrop;
 }
 
 export async function harvestCrop(userId, cropId) {
@@ -112,7 +113,7 @@ export async function harvestCrop(userId, cropId) {
     [userId, crop.seed_type_id]
   );
 
-  return { cropName: crop.seed_name, sellPrice: crop.sell_price };
+  await addXp(userId, XP_REWARDS.harvest, query);return { cropName: crop.seed_name, sellPrice: crop.sell_price };
 }
 
 export async function waterCrop(userId, cropId) {

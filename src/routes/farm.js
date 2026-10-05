@@ -2,6 +2,7 @@ import express from 'express';
 import { verifyTelegramAuth } from '../middleware/auth.js';
 import { plantSeed, harvestCrop, waterCrop } from '../services/crops.js';
 import { query } from '../db.js';
+import { addXp, XP_REWARDS } from '../services/xp.js';
 
 const router = express.Router();
 
@@ -67,6 +68,8 @@ router.get('/state', verifyTelegramAuth, async (req, res) => {
       [user.rows[0].id]
     );
 
+    const { xpForLevel } = await import('../services/xp.js');
+
     res.json({
       user: user.rows[0],
       crops: crops.rows,
@@ -75,6 +78,7 @@ router.get('/state', verifyTelegramAuth, async (req, res) => {
         active: hasAutowater,
         until: awUntil,
       },
+      xpForNext: xpForLevel(user.rows[0].level || 1),
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -108,6 +112,7 @@ router.post('/water', verifyTelegramAuth, async (req, res) => {
   try {const { cropId } = req.body;
     const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
     const result = await waterCrop(user.rows[0].id, cropId);
+    await addXp(user.rows[0].id, XP_REWARDS.water, query);
     res.json({ success: true, ...result });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -152,6 +157,8 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
     );
 
     await query('UPDATE users SET balance = balance + $1 WHERE id = $2', [totalPrice, userId]);
+
+    await addXp(userId, XP_REWARDS.sell_item * quantity, query);
 
     res.json({ success: true, reward: totalPrice, itemName: seed.rows[0].name, quantity });
   } catch (error) {
@@ -214,6 +221,8 @@ router.post('/buy-plot', verifyTelegramAuth, async (req, res) => {
     if (user.balance < price) {
       return res.status(400).json({ error: 'Недостаточно монет' });
     }await query('UPDATE users SET balance = balance - $1, plots = plots + 1 WHERE id = $2', [price, user.id]);
+
+    await addXp(user.id, XP_REWARDS.buy_plot, query);
 
     res.json({ success: true, newPlots: user.plots + 1, spent: price });
   } catch (error) {
