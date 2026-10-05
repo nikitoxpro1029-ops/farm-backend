@@ -37,21 +37,20 @@ export async function plantSeed(userId, seedTypeId) {
 
   const growthMinutes = GROWTH_TIMES[seedType.rarity] || 5;
   const readyAt = new Date(Date.now() + growthMinutes * 60 * 1000);
- const dogRes = await query('SELECT id FROM user_pets WHERE user_id = $1 AND pet_type = $2 LIMIT 1', [userId, 'dog']);
-const hasDog = dogRes.rows.length > 0;
-const witherHours = hasDog ? 36 : 24;
-const expiresAt = new Date(readyAt.getTime() + witherHours * 60 * 60 * 1000);
+  const expiresAt = new Date(readyAt.getTime() + 24 * 60 * 60 * 1000);
 
   await query(
     'UPDATE user_seeds SET quantity = quantity - 1 WHERE user_id = $1 AND seed_type_id = $2',
     [userId, seedTypeId]
-  );await query(
+  );
+
+  await query(
     'INSERT INTO user_discovered (user_id, seed_type_id, times_collected) VALUES ($1, $2, 0) ON CONFLICT (user_id, seed_type_id) DO NOTHING',
     [userId, seedTypeId]
   );
 
   const result = await query(
-    'INSERT INTO planted_crops (user_id, seed_type_id, ready_at, expires_at) VALUES ($1, $2, $3, $4) RETURNING *',
+    'INSERT INTO planted_crops (user_id, seed_type_id, ready_at, expires_at, water_level, last_watered) VALUES ($1, $2, $3, $4, 100, NOW()) RETURNING *',
     [userId, seedTypeId, readyAt, expiresAt]
   );
 
@@ -104,49 +103,29 @@ export async function harvestCrop(userId, cropId) {
 
   await query('UPDATE planted_crops SET harvested = TRUE WHERE id = $1', [cropId]);
 
-  await query(
-    'INSERT INTO harvested_items (user_id, seed_type_id, quantity) VALUES ($1, $2, 1) ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = harvested_items.quantity + 1',
+  await query('INSERT INTO harvested_items (user_id, seed_type_id, quantity) VALUES ($1, $2, 1) ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = harvested_items.quantity + 1',
     [userId, crop.seed_type_id]
-  );await query(
+  );
+
+  await query(
     'INSERT INTO user_discovered (user_id, seed_type_id, times_collected) VALUES ($1, $2, 1) ON CONFLICT (user_id, seed_type_id) DO UPDATE SET times_collected = user_discovered.times_collected + 1',
     [userId, crop.seed_type_id]
   );
 
   return { cropName: crop.seed_name, sellPrice: crop.sell_price };
-}export async function waterCrop(userId, cropId, score) {
+}
+
+export async function waterCrop(userId, cropId) {
   const cropRes = await query(
     'SELECT * FROM planted_crops WHERE id = $1 AND user_id = $2 AND harvested = FALSE',
     [cropId, userId]
   );
   if (cropRes.rows.length === 0) throw new Error('Crop not found');
 
-  const crop = cropRes.rows[0];
-
-  const waterGain = Math.min(20, score) * 5;
-  const qualityGain = Math.min(20, score) * 2;
-
-  const newWater = Math.min(100, crop.water_level + waterGain);
-  let newQuality = Math.min(100, crop.quality + qualityGain);
-  let newStreak = (crop.water_streak || 0) + 1;
-  let bonusQuality = 0;
-
-  if (newStreak >= 3) {
-    bonusQuality = 10;
-    newQuality = Math.min(100, newQuality + bonusQuality);
-    newStreak = 0;
-  }
-
   await query(
-    'UPDATE planted_crops SET water_level = $1, quality = $2, water_streak = $3, last_watered = NOW() WHERE id = $4',
-    [newWater, newQuality, newStreak, cropId]
+    'UPDATE planted_crops SET water_level = 100, dry_since = NULL, last_watered = NOW() WHERE id = $1',
+    [cropId]
   );
 
-  return {
-    waterLevel: newWater,
-    quality: newQuality,
-    waterGain,
-    qualityGain,
-    bonusQuality,
-    waterStreak: newStreak,
-  };
+  return { success: true, waterLevel: 100 };
 }

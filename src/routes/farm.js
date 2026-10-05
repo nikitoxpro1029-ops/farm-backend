@@ -5,6 +5,7 @@ import { query } from '../db.js';
 
 const router = express.Router();
 
+// ============ STATE ============
 router.get('/state', verifyTelegramAuth, async (req, res) => {
   try {
     let user = await query('SELECT * FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
@@ -15,25 +16,43 @@ router.get('/state', verifyTelegramAuth, async (req, res) => {
       );
     }
 
-    await query('UPDATE users SET last_seen = NOW(), inactive_notified = FALSE WHERE id = $1', [user.rows[0].id]);
+    await query(
+      'UPDATE users SET last_seen = NOW(), inactive_notified = FALSE WHERE id = $1',
+      [user.rows[0].id]
+    );
 
+    // Помечаем просроченные урожаи как завядшие
     await query(
       'UPDATE planted_crops SET harvested = TRUE, withered = TRUE WHERE user_id = $1 AND harvested = FALSE AND expires_at IS NOT NULL AND expires_at < NOW()',
       [user.rows[0].id]
     );
 
+    // Автополив
     const awRes = await query('SELECT autowater_until FROM users WHERE id = $1', [user.rows[0].id]);
     const awUntil = awRes.rows[0].autowater_until;
     const hasAutowater = awUntil && new Date(awUntil) > new Date();
 
     if (hasAutowater) {
       await query(
-        'UPDATE planted_crops SET water_level = 100, last_watered = NOW() WHERE user_id = $1 AND harvested = FALSE',
+        'UPDATE planted_crops SET water_level = 100, dry_since = NULL, last_watered = NOW() WHERE user_id = $1 AND harvested = FALSE',
         [user.rows[0].id]
       );
     } else {
+      // Понижаем воду на 10% в час
       await query(
         'UPDATE planted_crops SET water_level = GREATEST(0, water_level - FLOOR(EXTRACT(EPOCH FROM (NOW() - last_watered)) / 3600 * 10)), last_watered = NOW() WHERE user_id = $1 AND harvested = FALSE AND water_level > 0',
+        [user.rows[0].id]
+      );
+
+      // Если вода = 0 и dry_since = NULL — фиксируем момент начала засыхания
+      await query(
+        'UPDATE planted_crops SET dry_since = NOW() WHERE user_id = $1 AND harvested = FALSE AND water_level = 0 AND dry_since IS NULL',
+        [user.rows[0].id]
+      );
+
+      // Если засохло больше 12 часов назад — растение умирает
+      await query(
+        "UPDATE planted_crops SET harvested = TRUE, withered = TRUE WHERE user_id = $1 AND harvested = FALSE AND dry_since IS NOT NULL AND dry_since < NOW() - INTERVAL '12 hours'",
         [user.rows[0].id]
       );
     }
@@ -62,6 +81,7 @@ router.get('/state', verifyTelegramAuth, async (req, res) => {
   }
 });
 
+// ============ PLANT ============
 router.post('/plant', verifyTelegramAuth, async (req, res) => {
   try {
     const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
@@ -72,6 +92,7 @@ router.post('/plant', verifyTelegramAuth, async (req, res) => {
   }
 });
 
+// ============ HARVEST ============
 router.post('/harvest', verifyTelegramAuth, async (req, res) => {
   try {
     const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
@@ -82,17 +103,18 @@ router.post('/harvest', verifyTelegramAuth, async (req, res) => {
   }
 });
 
+// ============ WATER ============
 router.post('/water', verifyTelegramAuth, async (req, res) => {
-  try {
-    const { cropId, score } = req.body;
+  try {const { cropId } = req.body;
     const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
-    const result = await waterCrop(user.rows[0].id, cropId, score);
+    const result = await waterCrop(user.rows[0].id, cropId);
     res.json({ success: true, ...result });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
 });
 
+// ============ BARN ============
 router.get('/barn', verifyTelegramAuth, async (req, res) => {
   try {
     const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
@@ -100,11 +122,13 @@ router.get('/barn', verifyTelegramAuth, async (req, res) => {
       'SELECT hi.id, hi.quantity, st.name, st.rarity, st.sell_price, st.id as seed_type_id FROM harvested_items hi JOIN seed_types st ON hi.seed_type_id = st.id WHERE hi.user_id = $1 AND hi.quantity > 0 ORDER BY st.sell_price DESC',
       [user.rows[0].id]
     );
-    res.json({ items: items.rows });} catch (error) {
+    res.json({ items: items.rows });
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
+// ============ SELL ============
 router.post('/sell', verifyTelegramAuth, async (req, res) => {
   try {
     const { seedTypeId, quantity } = req.body;
@@ -120,14 +144,7 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
     }
 
     const seed = await query('SELECT sell_price, name FROM seed_types WHERE id = $1', [seedTypeId]);
-    const avgQualityRes = await query(
-      'SELECT AVG(quality) as avg_q FROM planted_crops WHERE user_id = $1 AND seed_type_id = $2 AND harvested = TRUE',
-      [userId, seedTypeId]
-    );
-    const avgQuality = parseFloat(avgQualityRes.rows[0]?.avg_q || 50);
-    const qualityMultiplier = 0.5 + (avgQuality / 100);
-    const unitPrice = Math.floor(seed.rows[0].sell_price * qualityMultiplier);
-    const totalPrice = unitPrice * quantity;
+    const totalPrice = seed.rows[0].sell_price * quantity;
 
     await query(
       'UPDATE harvested_items SET quantity = quantity - $1 WHERE user_id = $2 AND seed_type_id = $3',
@@ -142,6 +159,7 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
   }
 });
 
+// ============ LEADERBOARD ============
 router.get('/leaderboard', verifyTelegramAuth, async (req, res) => {
   try {
     const result = await query(
@@ -153,13 +171,14 @@ router.get('/leaderboard', verifyTelegramAuth, async (req, res) => {
   }
 });
 
+// ============ PLOTS ============
 router.get('/plots', verifyTelegramAuth, async (req, res) => {
   try {
     const userRes = await query('SELECT id, plots FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
     const user = userRes.rows[0];
     const maxAllowed = 12;
     const canBuy = user.plots < maxAllowed;
-    const prices = [0, 0, 0, 0, 0, 0, 500, 1000, 2000, 4000, 8000, 16000, 0];
+    const prices = [0, 0, 0, 0, 0, 0, 300, 600, 1200, 2400, 5000, 10000, 0];
     const nextPrice = canBuy ? prices[user.plots + 1] : 0;
 
     const plantedInfo = await query(
@@ -189,14 +208,12 @@ router.post('/buy-plot', verifyTelegramAuth, async (req, res) => {
       return res.status(400).json({ error: 'Максимум грядок достигнут' });
     }
 
-    const prices = [0, 0, 0, 0, 0, 0, 500, 1000, 2000, 4000, 8000, 16000, 0];
+    const prices = [0, 0, 0, 0, 0, 0, 300, 600, 1200, 2400, 5000, 10000, 0];
     const price = prices[user.plots + 1];
 
     if (user.balance < price) {
       return res.status(400).json({ error: 'Недостаточно монет' });
-    }
-
-    await query('UPDATE users SET balance = balance - $1, plots = plots + 1 WHERE id = $2', [price, user.id]);
+    }await query('UPDATE users SET balance = balance - $1, plots = plots + 1 WHERE id = $2', [price, user.id]);
 
     res.json({ success: true, newPlots: user.plots + 1, spent: price });
   } catch (error) {
@@ -204,6 +221,7 @@ router.post('/buy-plot', verifyTelegramAuth, async (req, res) => {
   }
 });
 
+// ============ FERTILIZE ============
 router.post('/fertilize', verifyTelegramAuth, async (req, res) => {
   try {
     const { cropId } = req.body;
@@ -214,7 +232,8 @@ router.post('/fertilize', verifyTelegramAuth, async (req, res) => {
       'SELECT * FROM planted_crops WHERE id = $1 AND user_id = $2 AND harvested = FALSE AND fertilized = FALSE',
       [cropId, user.id]
     );
-    if (cropRes.rows.length === 0) {return res.status(400).json({ error: 'Эту грядку уже удобряли или не нашли' });
+    if (cropRes.rows.length === 0) {
+      return res.status(400).json({ error: 'Эту грядку уже удобряли или не нашли' });
     }
 
     const cost = 100;
@@ -245,6 +264,7 @@ router.post('/fertilize', verifyTelegramAuth, async (req, res) => {
   }
 });
 
+// ============ AUTOWATER ============
 router.post('/buy-autowater', verifyTelegramAuth, async (req, res) => {
   try {
     const userRes = await query('SELECT id, balance, autowater_until FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
@@ -269,16 +289,56 @@ router.post('/buy-autowater', verifyTelegramAuth, async (req, res) => {
   }
 });
 
-router.get('/bonus-status', verifyTelegramAuth, async (req, res) => {
+// ============ CATALOG ============
+router.get('/catalog', verifyTelegramAuth, async (req, res) => {
   try {
     const userRes = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const userId = userRes.rows[0].id;
+
+    const allSeeds = await query(
+      'SELECT id, name, rarity, sell_price, description FROM seed_types ORDER BY sell_price ASC'
+    );
+
+    const discovered = await query(
+      'SELECT seed_type_id, times_collected FROM user_discovered WHERE user_id = $1',
+      [userId]
+    );
+
+    const discoveredMap = {};
+    for (const row of discovered.rows) {
+      discoveredMap[row.seed_type_id] = row.times_collected;
+    }
+
+    const catalog = allSeeds.rows.map((seed) => ({
+      id: seed.id,
+      name: seed.name,
+      rarity: seed.rarity,
+      sellPrice: seed.sell_price,
+      description: seed.description,
+      discovered: discoveredMap[seed.id] !== undefined,
+      timesCollected: discoveredMap[seed.id] || 0,
+    }));
+
+    res.json({
+      catalog,
+      total: catalog.length,
+      found: catalog.filter((c) => c.discovered).length,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ BONUS ============
+router.get('/bonus-status', verifyTelegramAuth, async (req, res) => {
+  try {const userRes = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
     const userId = userRes.rows[0].id;
     const today = new Date().toISOString().slice(0, 10);
 
     const bonusRes = await query('SELECT * FROM daily_bonuses WHERE user_id = $1', [userId]);
 
     if (bonusRes.rows.length === 0) {
-      return res.json({ streak: 0, canClaim: true, nextReward: 50, nextStreak: 1 });
+      return res.json({ streak: 0, canClaim: true, nextReward: 100, nextStreak: 1 });
     }
 
     const b = bonusRes.rows[0];
@@ -295,8 +355,8 @@ router.get('/bonus-status', verifyTelegramAuth, async (req, res) => {
       nextStreak = 1;
     }
 
-    const rewards = [0, 50, 75, 100, 150, 200, 300, 500];
-    const nextReward = rewards[nextStreak] || 50;
+    const rewards = [0, 100, 150, 200, 300, 400, 600, 1000];
+    const nextReward = rewards[nextStreak] || 100;
 
     res.json({ streak: b.streak, canClaim, nextReward, nextStreak });
   } catch (error) {
@@ -329,16 +389,17 @@ router.post('/claim-bonus', verifyTelegramAuth, async (req, res) => {
       } else {
         newStreak = 1;
       }
-    }const rewards = [0, 50, 75, 100, 150, 200, 300, 500];
-    const reward = rewards[newStreak] || 50;
+    }
+
+    const rewards = [0, 100, 150, 200, 300, 400, 600, 1000];
+    const reward = rewards[newStreak] || 100;
 
     await query('UPDATE users SET balance = balance + $1 WHERE id = $2', [reward, userId]);
 
     let bonusSeed = null;
     if (newStreak === 7) {
       const seedRes = await query(
-        'SELECT id, name, rarity FROM seed_types WHERE rarity = $1 ORDER BY RANDOM() LIMIT 1',
-        ['rare']
+        "SELECT id, name, rarity FROM seed_types WHERE rarity = 'rare' ORDER BY RANDOM() LIMIT 1"
       );
       if (seedRes.rows.length > 0) {
         const seed = seedRes.rows[0];
@@ -368,43 +429,8 @@ router.post('/claim-bonus', verifyTelegramAuth, async (req, res) => {
   }
 });
 
-router.get('/catalog', verifyTelegramAuth, async (req, res) => {
-  try {
-    const userRes = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
-    const userId = userRes.rows[0].id;
-
-    const allSeeds = await query(
-      'SELECT id, name, rarity, sell_price, description FROM seed_types ORDER BY sell_price ASC'
-    );
-
-    const discovered = await query(
-      'SELECT seed_type_id, times_collected FROM user_discovered WHERE user_id = $1',
-      [userId]
-    );
-
-    const discoveredMap = {};
-    for (const row of discovered.rows) {
-      discoveredMap[row.seed_type_id] = row.times_collected;
-    }
-
-    const catalog = allSeeds.rows.map((seed) => ({
-      id: seed.id,
-      name: seed.name,
-      rarity: seed.rarity,
-      sellPrice: seed.sell_price,
-      description: seed.description,
-      discovered: discoveredMap[seed.id] !== undefined,
-      timesCollected: discoveredMap[seed.id] || 0,
-    }));
-
-    const total = catalog.length;
-    const found = catalog.filter((c) => c.discovered).length;
-
-    res.json({ catalog, total, found });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});export default router;router.post('/set-referrer', verifyTelegramAuth, async (req, res) => {
+// ============ REFERRAL ============
+router.post('/set-referrer', verifyTelegramAuth, async (req, res) => {
   try {
     const { referrerTelegramId } = req.body;
     if (!referrerTelegramId) return res.json({ success: false, message: 'No referrer' });
@@ -418,9 +444,7 @@ router.get('/catalog', verifyTelegramAuth, async (req, res) => {
 
     if (String(referrerTelegramId) === String(req.telegramUser.id)) {
       return res.json({ success: false, message: 'Cannot refer yourself' });
-    }
-
-    const referrerRes = await query('SELECT id FROM users WHERE telegram_id = $1', [referrerTelegramId]);
+    }const referrerRes = await query('SELECT id FROM users WHERE telegram_id = $1', [referrerTelegramId]);
     if (referrerRes.rows.length === 0) {
       return res.json({ success: false, message: 'Referrer not found' });
     }
@@ -449,37 +473,6 @@ router.get('/referral-info', verifyTelegramAuth, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-});router.get('/catalog', verifyTelegramAuth, async (req, res) => {
-  try {
-    const userRes = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
-    const userId = userRes.rows[0].id;
-
-    const allSeeds = await query(
-      'SELECT id, name, rarity, sell_price, description FROM seed_types ORDER BY sell_price ASC'
-    );
-
-    const discovered = await query(
-      'SELECT seed_type_id, times_collected FROM user_discovered WHERE user_id = $1',
-      [userId]
-    );
-
-    const discoveredMap = {};
-    for (const row of discovered.rows) {
-      discoveredMap[row.seed_type_id] = row.times_collected;
-    }
-
-    const catalog = allSeeds.rows.map((seed) => ({
-      id: seed.id,
-      name: seed.name,
-      rarity: seed.rarity,
-      sellPrice: seed.sell_price,
-      description: seed.description,
-      discovered: discoveredMap[seed.id] !== undefined,
-      timesCollected: discoveredMap[seed.id] || 0,
-    }));
-
-    res.json({ catalog, total: catalog.length, found: catalog.filter((c) => c.discovered).length });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
 });
+
+export default router;
