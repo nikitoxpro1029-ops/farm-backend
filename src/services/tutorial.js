@@ -102,14 +102,7 @@ async function advanceTo(userId, nextStep) {
     );
   }
 
-  // Шаг 4 → 5: даём +3 морковки в амбар, чтобы было что продать
-if (nextStep === 5) {
-    await query(
-      `INSERT INTO harvested_items (user_id, seed_type_id, quantity) VALUES ($1, 2, 3)
-       ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = harvested_items.quantity + 3`,
-      [userId]
-    );
-  }
+  
 
   // Шаг 5 → 6: дарим +1 грядку
   if (nextStep === 6) {
