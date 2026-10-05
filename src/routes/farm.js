@@ -368,4 +368,49 @@ router.post('/claim-bonus', verifyTelegramAuth, async (req, res) => {
   }
 });
 
-export default router;
+export default router;router.post('/set-referrer', verifyTelegramAuth, async (req, res) => {
+  try {
+    const { referrerTelegramId } = req.body;
+    if (!referrerTelegramId) return res.json({ success: false, message: 'No referrer' });
+
+    const userRes = await query('SELECT id, referrer_id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const user = userRes.rows[0];
+
+    if (user.referrer_id) {
+      return res.json({ success: false, message: 'Already has referrer' });
+    }
+
+    if (String(referrerTelegramId) === String(req.telegramUser.id)) {
+      return res.json({ success: false, message: 'Cannot refer yourself' });
+    }
+
+    const referrerRes = await query('SELECT id FROM users WHERE telegram_id = $1', [referrerTelegramId]);
+    if (referrerRes.rows.length === 0) {
+      return res.json({ success: false, message: 'Referrer not found' });
+    }
+
+    await query('UPDATE users SET referrer_id = $1 WHERE id = $2', [referrerTelegramId, user.id]);
+    await query('UPDATE users SET balance = balance + 500, referrals_count = referrals_count + 1 WHERE telegram_id = $1', [referrerTelegramId]);
+    await query('UPDATE users SET balance = balance + 200 WHERE id = $1', [user.id]);
+
+    res.json({ success: true, reward: 200, referrerReward: 500 });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/referral-info', verifyTelegramAuth, async (req, res) => {
+  try {
+    const userRes = await query(
+      'SELECT referrals_count, referrer_id FROM users WHERE telegram_id = $1',
+      [req.telegramUser.id]
+    );
+    const user = userRes.rows[0];
+    res.json({
+      referralsCount: user.referrals_count || 0,
+      hasReferrer: !!user.referrer_id,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
