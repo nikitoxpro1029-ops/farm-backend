@@ -2,6 +2,7 @@ import express from 'express';
 import { verifyTelegramAuth } from '../middleware/auth.js';
 import { query } from '../db.js';
 import { addQuestProgress } from '../services/quests.js';
+import { tryAdvanceByTrigger } from '../services/tutorial.js';
 
 const router = express.Router();
 
@@ -45,6 +46,7 @@ router.post('/open', verifyTelegramAuth, async (req, res) => {
     );
 
     await addQuestProgress(userId, 'pack');
+    await tryAdvanceByTrigger(userId, 'pack');
     res.json({ success: true, seed: { name: selectedSeed.name, rarity: selectedSeed.rarity } });
   } catch (error) {
     res.status(500).json({ error: error.message });

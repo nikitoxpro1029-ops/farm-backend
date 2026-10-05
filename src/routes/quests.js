@@ -2,6 +2,7 @@ import express from 'express';
 import { verifyTelegramAuth } from '../middleware/auth.js';
 import { query } from '../db.js';
 import { ensureTodayQuests, QUEST_POOL } from '../services/quests.js';
+import { tryAdvanceByTrigger } from '../services/tutorial.js';
 
 const router = express.Router();
 
@@ -17,6 +18,7 @@ router.get('/', verifyTelegramAuth, async (req, res) => {
 
     // Если сегодня ещё нет заданий — сгенерируем
     await ensureTodayQuests(userId);
+    await tryAdvanceByTrigger(userId, 'quests');
 
     const result = await query(
       `SELECT id, quest_type, target, progress, reward, xp_reward, claimed

@@ -3,6 +3,8 @@ import { verifyTelegramAuth } from '../middleware/auth.js';
 import { plantSeed, harvestCrop, waterCrop } from '../services/crops.js';
 import { query } from '../db.js';
 import { addXp, XP_REWARDS } from '../services/xp.js';
+import { addQuestProgress } from '../services/quests.js';
+import { tryAdvanceByTrigger } from '../services/tutorial.js';
 
 const router = express.Router();
 
@@ -90,6 +92,8 @@ router.post('/plant', verifyTelegramAuth, async (req, res) => {
   try {
     const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
     const crop = await plantSeed(user.rows[0].id, req.body.seedTypeId);
+    await addQuestProgress(user.rows[0].id, 'plant');
+    await tryAdvanceByTrigger(user.rows[0].id, 'plant');
     res.json({ success: true, crop });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -101,6 +105,8 @@ router.post('/harvest', verifyTelegramAuth, async (req, res) => {
   try {
     const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
     const result = await harvestCrop(user.rows[0].id, req.body.cropId);
+    await addQuestProgress(user.rows[0].id, 'harvest');
+    await tryAdvanceByTrigger(user.rows[0].id, 'harvest');
     res.json({ success: true, ...result });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -115,6 +121,7 @@ router.post('/water', verifyTelegramAuth, async (req, res) => {
     const result = await waterCrop(user.rows[0].id, cropId);
     await addXp(user.rows[0].id, XP_REWARDS.water, query);
     await addQuestProgress(user.rows[0].id, 'water');
+    await tryAdvanceByTrigger(user.rows[0].id, 'water');
     res.json({ success: true, ...result });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -161,8 +168,10 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
     await query('UPDATE users SET balance = balance + $1 WHERE id = $2', [totalPrice, userId]);
 
     await addXp(userId, XP_REWARDS.sell_item * quantity, query);
-
     await addQuestProgress(userId, 'sell', quantity);
+    await tryAdvanceByTrigger(userId, 'sell');
+
+    
     res.json({ success: true, reward: totalPrice, itemName: seed.rows[0].name, quantity });
   } catch (error) {
     res.status(500).json({ error: error.message });
