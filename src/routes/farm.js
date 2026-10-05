@@ -484,4 +484,76 @@ router.get('/referral-info', verifyTelegramAuth, async (req, res) => {
   }
 });
 
-export default router;
+router.get('/profile', verifyTelegramAuth, async (req, res) => {
+  try {
+    const userRes = await query('SELECT * FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const user = userRes.rows[0];
+    const userId = user.id;
+
+    const harvested = await query(
+      'SELECT COUNT(*) as cnt FROM planted_crops WHERE user_id = $1 AND harvested = TRUE AND withered = FALSE',
+      [userId]
+    );
+    const planted = await query(
+      'SELECT COUNT(*) as cnt FROM planted_crops WHERE user_id = $1',
+      [userId]
+    );
+    const sold = await query(
+      'SELECT COALESCE(SUM(quantity), 0) as cnt FROM harvested_items WHERE user_id = $1',
+      [userId]
+    );
+    const pets = await query(
+      'SELECT COUNT(*) as cnt FROM user_pets WHERE user_id = $1',
+      [userId]
+    );
+    const discovered = await query(
+      'SELECT COUNT(DISTINCT seed_type_id) as cnt FROM user_discovered WHERE user_id = $1',
+      [userId]
+    );
+    const catalogTotal = await query('SELECT COUNT(*) as cnt FROM seed_types');
+    const top = await query(
+      'SELECT telegram_id, first_name, username, balance, level FROM users WHERE hide_from_leaderboard = FALSE OR hide_from_leaderboard IS NULL ORDER BY balance DESC LIMIT 10'
+    );
+
+    const allSeeds = await query(
+      'SELECT id, name, rarity, sell_price, description FROM seed_types ORDER BY sell_price ASC'
+    );
+    const discoveredList = await query(
+      'SELECT seed_type_id, times_collected FROM user_discovered WHERE user_id = $1',
+      [userId]
+    );
+    const discMap = {};
+    for (const row of discoveredList.rows) {
+      discMap[row.seed_type_id] = row.times_collected;
+    }
+    const catalog = allSeeds.rows.map((seed) => ({
+      id: seed.id,
+      name: seed.name,
+      rarity: seed.rarity,
+      sellPrice: seed.sell_price,
+      description: seed.description,
+      discovered: discMap[seed.id] !== undefined,
+      timesCollected: discMap[seed.id] || 0,
+    }));
+
+    const { xpForLevel } = await import('../services/xp.js');
+
+    res.json({
+      user,
+      xpForNext: xpForLevel(user.level || 1),
+      stats: {
+        harvested: parseInt(harvested.rows[0].cnt),
+        planted: parseInt(planted.rows[0].cnt),
+        sold: parseInt(sold.rows[0].cnt),
+        pets: parseInt(pets.rows[0].cnt),
+        referrals: user.referrals_count || 0,
+        discovered: parseInt(discovered.rows[0].cnt),
+        catalogTotal: parseInt(catalogTotal.rows[0].cnt),
+      },
+      leaderboard: top.rows,
+      catalog,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});export default router;
