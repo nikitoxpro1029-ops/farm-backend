@@ -5,7 +5,7 @@ import { query } from '../db.js';
 const router = express.Router();
 
 // Допустимые множители от мини-игры Кухни
-const VALID_MULTIPLIERS = [0.5, 1.0, 1.5, 2.0];
+const VALID_MULTIPLIERS = [0.5, 1.0, 1.15, 1.3];
 
 router.get('/recipes', verifyTelegramAuth, async (req, res) => {
   try {
