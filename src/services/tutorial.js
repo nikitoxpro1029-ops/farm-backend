@@ -3,12 +3,12 @@ import { query } from '../db.js';
 // trigger: null = manual (кнопка "Дальше")
 // trigger: 'xxx' = auto (ждём событие от бэка)
 export const TUTORIAL_STEPS = [
-  { step: 1,  dialog: 'Здравствуй, внучок! Я — дед Мазай. Стар я стал, хозяйство моё в упадок пришло… Прими ферму, а я подскажу, что к чему. Держи-ка 3 морковки — посадим?', trigger: null },
+  { step: 1,  dialog: 'Здравствуй, внучок! Я — дед Мазай. Стар я стал, хозяйство моё в упадок пришло… Прими ферму, а я подскажу, что к чему. Держи-ка морковку — посадим?', trigger: null },
   { step: 2,  dialog: 'Вот твоя грядка. Тапни по ней — посадишь морковку.', trigger: 'plant' },
   { step: 3,  dialog: 'Молодец! Теперь полей её — видишь капельку? Без воды никак.', trigger: 'water' },
   { step: 4,  dialog: 'Терпение, внучок — морковь не сразу растёт. Если спешишь — ускорь удобрением. А теперь жди.', trigger: null },
-  { step: 5,  dialog: 'Гляди-ка, созрела! Жми «Собрать» — и урожай в Амбаре.', trigger: 'harvest' },
-  { step: 6,  dialog: 'Деньги нужны всегда. Открой Амбар сверху → вкладку Урожай → продай морковку.', trigger: 'sell' },
+  { step: 5,  dialog: 'Гляди-ка, созрела! Жми «Собрать» — и урожай в Амбар.', trigger: 'harvest' },
+  { step: 6,  dialog: 'Деньги нужны всегда. Открой Амбар сверху → вкладку Урожай → продай одну морковку.', trigger: 'sell' },
   { step: 7,  dialog: 'Умница! Держи новую грядку в подарок от Деда — расширяйся, внучок!', trigger: null },
   { step: 8,  dialog: 'Слышал, в Паках диковинные семена выпадают? Попробуй открыть один — авось повезёт!', trigger: 'pack' },
   { step: 9,  dialog: 'А вот моё любимое — Кухня! Держи 3 морковки — испеки Морковный пирог, прибыль жирнее в разы.', trigger: 'cook' },
@@ -66,8 +66,16 @@ export async function tryAdvanceByTrigger(userId, trigger) {
 }
 
 async function advanceTo(userId, nextStep) {
-  // Завершили шаг 1 → выдаём 3 морковки (seed_type_id = 2)
-  // Перешли на шаг 3 ("полей морковку") — сбрасываем воду последней грядки до 30%
+  // Шаг 1 → 2: даём 1 морковку (семечко) для посадки
+  if (nextStep === 2) {
+    await query(
+      `INSERT INTO user_seeds (user_id, seed_type_id, quantity) VALUES ($1, 2, 1)
+       ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = user_seeds.quantity + 1`,
+      [userId]
+    );
+  }
+
+  // Шаг 2 → 3: сбрасываем воду последней грядки до 30%, чтобы была кнопка «Полить»
   if (nextStep === 3) {
     await query(
       `UPDATE planted_crops
@@ -79,43 +87,51 @@ async function advanceTo(userId, nextStep) {
        )`,
       [userId]
     );
-  }if (nextStep === 2) {
-    await query(
-      `INSERT INTO user_seeds (user_id, seed_type_id, quantity) VALUES ($1, 2, 3)
-       ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = user_seeds.quantity + 3`,
-      [userId]
-    );
-  }// Перешли на шаг 5 ("созрела, собери") — мгновенно ускоряем последнюю грядку
+  }
+
+  // Шаг 4 → 5: мгновенно ускоряем последнюю грядку, чтобы морковь созрела
   if (nextStep === 5) {
     await query(
       `UPDATE planted_crops
        SET ready_at = NOW()
        WHERE id = (
          SELECT id FROM planted_crops
-         WHERE user_id = $1 AND harvested = false AND withered = false
-         ORDER BY id DESC LIMIT 1
+         WHERE user_id = $1 AND harvested = false AND withered = falseORDER BY id DESC LIMIT 1
        )`,
       [userId]
     );
-  }// Перешли на шаг 7 ("держи грядку в подарок") — дарим +1 грядку
-    if (nextStep === 7) {
-      await query('UPDATE users SET plots = plots + 1 WHERE id = $1', [userId]);
-    }// Перешли на шаг 9 ("испеки Морковный пирог") — даём 3 морковки в амбар
-    if (nextStep === 9) {
-      await query(
-        `INSERT INTO harvested_items (user_id, seed_type_id, quantity) VALUES ($1, 2, 3)
-         ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = harvested_items.quantity + 3`,
-        [userId]
-      );
-    }
+  }
 
+  // Шаг 5 → 6: даём +3 морковки в амбар, чтобы было что продать
+  if (nextStep === 6) {
+    await query(
+      `INSERT INTO harvested_items (user_id, seed_type_id, quantity) VALUES ($1, 2, 3)
+       ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = harvested_items.quantity + 3`,
+      [userId]
+    );
+  }
+
+  // Шаг 6 → 7: дарим +1 грядку
+  if (nextStep === 7) {
+    await query('UPDATE users SET plots = plots + 1 WHERE id = $1', [userId]);
+  }
+
+  // Шаг 8 → 9: даём +3 морковки в амбар для Морковного пирога
+  if (nextStep === 9) {
+    await query(
+      `INSERT INTO harvested_items (user_id, seed_type_id, quantity) VALUES ($1, 2, 3)
+       ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = harvested_items.quantity + 3`,
+      [userId]
+    );
+  }
+
+  // Завершение туториала
   if (nextStep > TUTORIAL_STEPS.length) {
-    // Последний шаг пройден — завершаем
     await query(
       'UPDATE user_tutorial SET step = $1, completed_at = NOW() WHERE user_id = $2',
       [nextStep, userId]
     );
-    // Награда 500💰 за прохождение туториала
+    // Награда за прохождение — 500 монет
     await query('UPDATE users SET balance = balance + 500 WHERE id = $1', [userId]);
   } else {
     await query(
