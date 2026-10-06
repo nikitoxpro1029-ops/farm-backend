@@ -376,7 +376,7 @@ router.get('/bonus-status', verifyTelegramAuth, async (req, res) => {
       nextStreak = 1;
     }
 
-    const rewards = [0, 100, 150, 200, 300, 400, 600, 1000];
+    const rewards = [0, 30, 50, 75, 100, 150, 200, 400];
     const nextReward = rewards[nextStreak] || 100;
 
     res.json({ streak: b.streak, canClaim, nextReward, nextStreak });
