@@ -603,12 +603,29 @@ router.post('/upgrade-plot', verifyTelegramAuth, async (req, res) => {
 // Информация об уровнях всех грядок
 router.get('/plot-levels', verifyTelegramAuth, async (req, res) => {
   try {
-    const userRes = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    const userRes = await query(
+      'SELECT id, balance, crystals, plots FROM users WHERE telegram_id = $1',
+      [req.telegramUser.id]
+    );
     if (userRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
-    const userId = userRes.rows[0].id;
+    const user = userRes.rows[0];
+    const userId = user.id;
 
     const levels = await getAllPlotLevels(userId);
-    res.json({ levels });
+    const costs = {};
+    for (let i = 0; i < user.plots; i++) {
+      const lvl = levels[i] || 1;
+      const cost = getUpgradeCost(lvl);
+      const crystals = getCrystalCostForLevel(lvl + 1);
+      costs[i] = cost ? { coins: cost.coins, crystals } : null;
+    }
+
+    res.json({
+      levels,
+      costs,
+      balance: user.balance,
+      crystals: user.crystals,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
