@@ -105,7 +105,7 @@ export async function plantSeed(userId, seedTypeId, plotIndex = null) {
 
 export async function harvestCrop(userId, cropId) {
   const cropResult = await query(
-  'SELECT pc.*, st.sell_price, st.rarity, st.name as seed_name, pc.seed_type_id FROM planted_crops ...',
+  'SELECT pc.*, st.sell_price, st.rarity, st.name as seed_name, pc.seed_type_id FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id WHERE pc.id = $1 AND pc.user_id = $2',
   [cropId, userId]
 );
   if (cropResult.rows.length === 0) throw new Error('Crop not found');
