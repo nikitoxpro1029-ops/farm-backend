@@ -158,7 +158,13 @@ export async function harvestCrop(userId, cropId) {
   if (incomeBonus > 0) {
     await query('UPDATE users SET balance = balance + $1 WHERE id = $2', [incomeBonus, userId]);
   }
-  return { cropName: crop.seed_name, sellPrice: crop.sell_price, crystal: gotCrystal ? 1 : 0 };
+  return {
+    cropName: crop.seed_name,
+    sellPrice: crop.sell_price,
+    crystal: gotCrystal ? 1 : 0,
+    incomeBonus: incomeBonus,
+    plotLevel: plotLevel,
+  };
 }
 
 export async function waterCrop(userId, cropId) {
