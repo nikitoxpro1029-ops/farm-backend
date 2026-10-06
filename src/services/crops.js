@@ -85,9 +85,9 @@ export async function plantSeed(userId, seedTypeId) {
 
 export async function harvestCrop(userId, cropId) {
   const cropResult = await query(
-    'SELECT pc.*, st.sell_price, st.name as seed_name, pc.seed_type_id FROM planted_crops pc JOIN seed_types st ON pc.seed_type_id = st.id WHERE pc.id = $1 AND pc.user_id = $2 AND pc.harvested = FALSE',
-    [cropId, userId]
-  );
+  'SELECT pc.*, st.sell_price, st.rarity, st.name as seed_name, pc.seed_type_id FROM planted_crops ...',
+  [cropId, userId]
+);
   if (cropResult.rows.length === 0) throw new Error('Crop not found');
 
   const crop = cropResult.rows[0];
@@ -113,7 +113,24 @@ export async function harvestCrop(userId, cropId) {
     [userId, crop.seed_type_id]
   );
 
-  await addXp(userId, XP_REWARDS.harvest, query);return { cropName: crop.seed_name, sellPrice: crop.sell_price };
+ await addXp(userId, XP_REWARDS.harvest, query);
+
+  // 💎 Дроп кристаллов по редкости
+  const CRYSTAL_CHANCE = {
+    common: 0.01,
+    uncommon: 0.03,
+    rare: 0.05,
+    epic: 0.10,
+    legendary: 0.20,
+    mythic: 0.40,
+  };
+  const chance = CRYSTAL_CHANCE[crop.rarity] || 0;
+  const gotCrystal = Math.random() < chance;
+  if (gotCrystal) {
+    await query('UPDATE users SET crystals = crystals + 1 WHERE id = $1', [userId]);
+  }
+
+  return { cropName: crop.seed_name, sellPrice: crop.sell_price, crystal: gotCrystal ? 1 : 0 };
 }
 
 export async function waterCrop(userId, cropId) {
