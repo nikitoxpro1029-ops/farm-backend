@@ -1,6 +1,7 @@
 import { query } from '../db.js';
 import { sendTelegramMessage } from './notifications.js';
 import { addXp, XP_REWARDS } from './xp.js';
+import { getPlotLevel, getLevelMultipliers } from './plots.js';
 
 const GROWTH_TIMES = {
   common: 5,
@@ -11,7 +12,7 @@ const GROWTH_TIMES = {
   mythic: 720,
 };
 
-export async function plantSeed(userId, seedTypeId) {
+export async function plantSeed(userId, seedTypeId, plotIndex = null) {
   const seedResult = await query(
     'SELECT id FROM user_seeds WHERE user_id = $1 AND seed_type_id = $2 AND quantity > 0',
     [userId, seedTypeId]
@@ -28,6 +29,22 @@ export async function plantSeed(userId, seedTypeId) {
   if (parseInt(plantedInfo.rows[0].cnt) >= maxPlots) {
     throw new Error('Все грядки заняты! Купите ещё в разделе Ферма.');
   }
+  // Определяем, на какую грядку сажаем
+  let finalPlotIndex = plotIndex;
+  if (finalPlotIndex === null || finalPlotIndex === undefined) {
+    // Если фронт не передал номер — ищем первую свободную
+    const occupiedRes = await query(
+      'SELECT plot_index FROM planted_crops WHERE user_id = $1 AND harvested = false',
+      [userId]
+    );
+    const occupied = new Set(occupiedRes.rows.map(r => r.plot_index));
+    for (let i = 0; i < maxPlots; i++) {
+      if (!occupied.has(i)) { finalPlotIndex = i; break; }
+    }
+    if (finalPlotIndex === null) {
+      throw new Error('Все грядки заняты! Купите ещё в разделе Ферма.');
+    }
+  }
 
   const typeResult = await query('SELECT * FROM seed_types WHERE id = $1', [seedTypeId]);
   const seedType = typeResult.rows[0];
@@ -36,7 +53,10 @@ export async function plantSeed(userId, seedTypeId) {
     throw new Error('Это блюдо нельзя посадить, только продать');
   }
 
-  const growthMinutes = GROWTH_TIMES[seedType.rarity] || 5;
+  const plotLevel = await getPlotLevel(userId, finalPlotIndex);
+  const { timeMultiplier } = getLevelMultipliers(plotLevel);
+  const baseGrowthMinutes = GROWTH_TIMES[seedType.rarity] || 5;
+  const growthMinutes = baseGrowthMinutes * timeMultiplier;
   const readyAt = new Date(Date.now() + growthMinutes * 60 * 1000);
   const expiresAt = new Date(readyAt.getTime() + 24 * 60 * 60 * 1000);
 
@@ -51,9 +71,9 @@ export async function plantSeed(userId, seedTypeId) {
   );
 
   const result = await query(
-    'INSERT INTO planted_crops (user_id, seed_type_id, ready_at, expires_at, water_level, last_watered) VALUES ($1, $2, $3, $4, 100, NOW()) RETURNING *',
-    [userId, seedTypeId, readyAt, expiresAt]
-  );
+  'INSERT INTO planted_crops (user_id, seed_type_id, ready_at, expires_at, water_level, last_watered, plot_index) VALUES ($1, $2, $3, $4, 100, NOW(), $5) RETURNING *',
+  [userId, seedTypeId, readyAt, expiresAt, finalPlotIndex]
+);
 
   const newCrop = result.rows[0];
   const delay = readyAt.getTime() - Date.now();

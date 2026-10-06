@@ -5,6 +5,7 @@ import { query } from '../db.js';
 import { addXp, XP_REWARDS } from '../services/xp.js';
 import { addQuestProgress } from '../services/quests.js';
 import { tryAdvanceByTrigger } from '../services/tutorial.js';
+import { upgradePlot, getAllPlotLevels, getUpgradeCost, getCrystalCostForLevel, getPlotLevel } from '../services/plots.js';
 
 const router = express.Router();
 
@@ -91,7 +92,7 @@ router.get('/state', verifyTelegramAuth, async (req, res) => {
 router.post('/plant', verifyTelegramAuth, async (req, res) => {
   try {
     const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
-    const crop = await plantSeed(user.rows[0].id, req.body.seedTypeId);
+    const crop = await plantSeed(user.rows[0].id, req.body.seedTypeId, req.body.plotIndex);
     await addQuestProgress(user.rows[0].id, 'plant');
     await tryAdvanceByTrigger(user.rows[0].id, 'plant');
     res.json({ success: true, crop });
@@ -568,4 +569,49 @@ router.get('/profile', verifyTelegramAuth, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-});export default router;
+});
+// ============ UPGRADE PLOT ============
+router.post('/upgrade-plot', verifyTelegramAuth, async (req, res) => {
+  try {
+    const { plotIndex } = req.body;
+    if (typeof plotIndex !== 'number' || plotIndex < 0) {
+      return res.status(400).json({ error: 'Invalid plotIndex' });
+    }
+
+    const userRes = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const userId = userRes.rows[0].id;
+
+    const result = await upgradePlot(userId, plotIndex);
+
+    if (result.error) {
+      const messages = {
+        MAX_LEVEL: 'Грядка уже максимального уровня',
+        USER_NOT_FOUND: 'Игрок не найден',
+        NOT_ENOUGH_COINS: 'Не хватает монет',
+        NOT_ENOUGH_CRYSTALS: 'Не хватает кристаллов',
+      };
+      return res.status(400).json({ error: messages[result.error] || 'Ошибка' });
+    }
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Информация об уровнях всех грядок
+router.get('/plot-levels', verifyTelegramAuth, async (req, res) => {
+  try {
+    const userRes = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const userId = userRes.rows[0].id;
+
+    const levels = await getAllPlotLevels(userId);
+    res.json({ levels });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+export default router;
