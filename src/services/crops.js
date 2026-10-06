@@ -2,6 +2,7 @@ import { query } from '../db.js';
 import { sendTelegramMessage } from './notifications.js';
 import { addXp, XP_REWARDS } from './xp.js';
 import { getPlotLevel, getLevelMultipliers } from './plots.js';
+import { getPlotLevel, getLevelMultipliers } from './plots.js';
 
 const GROWTH_TIMES = {
   common: 5,
@@ -149,7 +150,14 @@ export async function harvestCrop(userId, cropId) {
   if (gotCrystal) {
     await query('UPDATE users SET crystals = crystals + 1 WHERE id = $1', [userId]);
   }
+// 💰 Бонус дохода от уровня грядки
+  const plotLevel = await getPlotLevel(userId, crop.plot_index);
+  const { incomeMultiplier } = getLevelMultipliers(plotLevel);
+  const incomeBonus = Math.round(crop.sell_price * (incomeMultiplier - 1));
 
+  if (incomeBonus > 0) {
+    await query('UPDATE users SET balance = balance + $1 WHERE id = $2', [incomeBonus, userId]);
+  }
   return { cropName: crop.seed_name, sellPrice: crop.sell_price, crystal: gotCrystal ? 1 : 0 };
 }
 
