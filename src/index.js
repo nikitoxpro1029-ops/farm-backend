@@ -9,6 +9,7 @@ import { sendTelegramMessage } from './services/notifications.js';
 import petsRoutes from './routes/pets.js';
 import questRoutes from './routes/quests.js';
 import tutorialRoutes from './routes/tutorial.js';
+import cosmeticsRoutes from './routes/cosmetics.js';
 dotenv.config();
 
 const app = express();
@@ -21,6 +22,7 @@ app.use('/api/memory', memoryRoutes);
 app.use('/api/craft', craftRoutes);
 app.use('/api/pets', petsRoutes);
 app.use('/api/quests', questRoutes);
+app.use('/api/cosmetics', cosmeticsRoutes);
 
 app.get('/', (req, res) => res.json({ status: 'ok' }));
 
