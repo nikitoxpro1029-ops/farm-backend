@@ -109,14 +109,22 @@ async function advanceTo(userId, nextStep) {
     await query('UPDATE users SET plots = plots + 1 WHERE id = $1', [userId]);
   }
 
-  // Шаг 7 → 8: даём +3 морковки в амбар для Морковного пирога
-  if (nextStep === 8) {
-    await query(
-      `INSERT INTO harvested_items (user_id, seed_type_id, quantity) VALUES ($1, 2, 3)
-       ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = harvested_items.quantity + 3`,
-      [userId]
-    );
-  }
+ // Перешли на шаг 8 ("Кухня") — додаём морковки до 3
+    if (nextStep === 8) {
+      const cur = await query(
+        'SELECT quantity FROM harvested_items WHERE user_id = $1 AND seed_type_id = 2',
+        [userId]
+      );
+      const have = cur.rows.length > 0 ? cur.rows[0].quantity : 0;
+      if (have < 3) {
+        const diff = 3 - have;
+        await query(
+          `INSERT INTO harvested_items (user_id, seed_type_id, quantity) VALUES ($1, 2, $2)
+           ON CONFLICT (user_id, seed_type_id) DO UPDATE SET quantity = harvested_items.quantity + $2`,
+          [userId, diff]
+        );
+      }
+    }
 
   // Завершение туториала
   if (nextStep > TUTORIAL_STEPS.length) {

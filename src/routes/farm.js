@@ -4,7 +4,7 @@ import { plantSeed, harvestCrop, waterCrop } from '../services/crops.js';
 import { query } from '../db.js';
 import { addXp, XP_REWARDS } from '../services/xp.js';
 import { addQuestProgress } from '../services/quests.js';
-import { tryAdvanceByTrigger } from '../services/tutorial.js';
+import { tryAdvanceByTrigger, getTutorialState } from '../services/tutorial.js';
 import { upgradePlot, getAllPlotLevels, getUpgradeCost, getCrystalCostForLevel, getPlotLevel } from '../services/plots.js';
 
 const router = express.Router();
@@ -149,7 +149,15 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
     const { seedTypeId, quantity } = req.body;
     const user = await query('SELECT id FROM users WHERE telegram_id = $1', [req.telegramUser.id]);
     const userId = user.rows[0].id;
-
+// 🥕 Блокировка продажи морковки на шагах 6-8 туториала
+    if (seedTypeId === 2) {
+      const tut = await getTutorialState(userId);
+      if (!tut.skipped && !tut.completed && tut.step >= 6 && tut.step <= 8) {
+        return res.status(400).json({
+          error: '🥕 Не продавай морковку! Она нужна для Морковного пирога!'
+        });
+      }
+    }
     const item = await query(
       'SELECT * FROM harvested_items WHERE user_id = $1 AND seed_type_id = $2',
       [userId, seedTypeId]
