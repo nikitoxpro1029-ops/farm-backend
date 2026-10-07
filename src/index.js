@@ -71,7 +71,7 @@ async function checkInactivePlayers() {
     );
     for (const user of candidates.rows) {
       const name = user.first_name || 'Фермер';
-      const message = '🎁 ' + name + ', твой ежедневный бонус ждёт!\n\nЗаходи и забери монеты — на 7-й день дают 1000💰 и редкое семя!';
+      const message = '🎁 ' + name + ', твой ежедневный бонус ждёт!\n\nЗаходи и забери монеты — на 7-й день дают 400💰 и 5💎!';
       await sendTelegramMessage(user.telegram_id, message);
       await query('UPDATE users SET bonus_notified_date = CURRENT_DATE WHERE telegram_id = $1', [user.telegram_id]);
     }

@@ -2,7 +2,6 @@ import { query } from '../db.js';
 import { sendTelegramMessage } from './notifications.js';
 import { addXp, XP_REWARDS } from './xp.js';
 import { getPlotLevel, getLevelMultipliers } from './plots.js';
-import { getPlotLevel, getLevelMultipliers } from './plots.js';
 
 const GROWTH_TIMES = {
   common: 5,
