@@ -12,7 +12,7 @@ export async function getCatalog() {
 export async function getMyCosmetics(userId) {
   const owned = await query(
     `SELECT uc.id AS user_cosmetic_id, uc.cosmetic_id, uc.serial_number, uc.acquired_at,
-            c.name, c.type, c.rarity, c.icon, c.price_crystals
+       c.name, c.type, c.rarity, c.icon, c.bg_image, c.price_crystals
      FROM user_cosmetics uc
      JOIN cosmetics c ON c.id = uc.cosmetic_id
      WHERE uc.user_id = $1
