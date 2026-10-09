@@ -543,8 +543,17 @@ router.get('/profile', verifyTelegramAuth, async (req, res) => {
     );
     const catalogTotal = await query('SELECT COUNT(*) as cnt FROM seed_types');
     const top = await query(
-      'SELECT telegram_id, first_name, username, balance, level FROM users WHERE hide_from_leaderboard = FALSE OR hide_from_leaderboard IS NULL ORDER BY balance DESC LIMIT 10'
-    );
+  `SELECT 
+     u.telegram_id, u.first_name, u.username, u.balance, u.level,
+     c.bg_image AS frame_bg,
+     c.rarity AS frame_rarity
+   FROM users u
+   LEFT JOIN user_loadout ul ON ul.user_id = u.id
+   LEFT JOIN cosmetics c ON c.id = ul.equipped_frame
+   WHERE u.hide_from_leaderboard = false
+   ORDER BY u.balance DESC
+   LIMIT 100`
+);
 
     const allSeeds = await query(
       'SELECT id, name, rarity, sell_price, description FROM seed_types ORDER BY sell_price ASC'
