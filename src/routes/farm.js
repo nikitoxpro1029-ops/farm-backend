@@ -545,7 +545,8 @@ router.get('/profile', verifyTelegramAuth, async (req, res) => {
     const top = await query(
   `SELECT 
      u.telegram_id, u.first_name, u.username, u.balance, u.level,
-     c.bg_image AS frame_bg,
+     c.bg_image_wide AS frame_bg_wide,
+     c.bg_image_sq AS frame_bg_sq,
      c.rarity AS frame_rarity
    FROM users u
    LEFT JOIN user_loadout ul ON ul.user_id = u.id
