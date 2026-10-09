@@ -191,7 +191,17 @@ router.post('/sell', verifyTelegramAuth, async (req, res) => {
 router.get('/leaderboard', verifyTelegramAuth, async (req, res) => {
   try {
     const result = await query(
-      'SELECT telegram_id, username, first_name, balance FROM users WHERE hide_from_leaderboard = FALSE OR hide_from_leaderboard IS NULL ORDER BY balance DESC LIMIT 50'
+      `SELECT 
+         u.telegram_id, u.username, u.first_name, u.balance,
+         c.icon AS frame_icon,
+         c.bg_image AS frame_bg,
+         c.rarity AS frame_rarity
+       FROM users u
+       LEFT JOIN user_loadout ul ON ul.user_id = u.id
+       LEFT JOIN cosmetics c ON c.id = ul.equipped_frame
+       WHERE u.hide_from_leaderboard = false
+       ORDER BY u.balance DESC
+       LIMIT 100`
     );
     res.json({ leaderboard: result.rows });
   } catch (error) {
